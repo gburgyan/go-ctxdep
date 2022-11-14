@@ -1,4 +1,4 @@
-module gitlab.com/gburgyan/godepinject
+module gitlab.com/gburgyan/go-ctxdep
 
 go 1.13
 
