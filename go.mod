@@ -1,4 +1,4 @@
-module godepinject
+module gitlab.com/gburgyan/godepinject
 
 go 1.18
 
