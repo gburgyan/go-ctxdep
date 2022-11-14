@@ -1,4 +1,4 @@
-![Build status](https://github.com/gburgyan/go-ctxdep/actions/workflows/go.yml/badge.svg)
+![Build status](https://github.com/gburgyan/go-ctxdep/actions/workflows/go.yml/badge.svg) [![PkgGoDev](https://pkg.go.dev/badge/github.com/gburgyan/go-ctxdep)](https://pkg.go.dev/github.com/gburgyan/go-ctxdep)
 
 # Go Context Dependencies
 
