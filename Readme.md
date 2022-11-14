@@ -1,4 +1,4 @@
-![Build status](https://github.com/gburgyan/godepinject/actions/workflows/go.yml/badge.svg)
+![Build status](https://github.com/gburgyan/go-ctxdep/actions/workflows/go.yml/badge.svg)
 
 # GoDepInject
 
