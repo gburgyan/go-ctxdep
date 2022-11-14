@@ -3,7 +3,6 @@ package ctxdep
 import (
 	"context"
 	"fmt"
-	"log"
 	"reflect"
 	"sync"
 )
@@ -126,8 +125,6 @@ func (d *DependencyContext) GetWithError(ctx context.Context, targets ...interfa
 			return err
 		}
 	}
-	log.Default()
-
 	return nil
 }
 
