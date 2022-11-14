@@ -12,14 +12,14 @@ type DependencyError struct {
 	SourceError    error
 }
 
-func (d *DependencyError) Error() string {
-	if d.SourceError == nil {
-		return fmt.Sprintf("%s: %v", d.Message, d.ReferencedType)
+func (e *DependencyError) Error() string {
+	if e.SourceError == nil {
+		return fmt.Sprintf("%s: %v", e.Message, e.ReferencedType)
 	} else {
-		return fmt.Sprintf("%s: %v (%v)", d.Message, d.ReferencedType, d.SourceError.Error())
+		return fmt.Sprintf("%s: %v (%v)", e.Message, e.ReferencedType, e.Unwrap().Error())
 	}
 }
 
-func (d *DependencyError) Unwrap() error {
-	return d.SourceError
+func (e *DependencyError) Unwrap() error {
+	return e.SourceError
 }

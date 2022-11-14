@@ -52,6 +52,7 @@ func formatGeneratorDebug(gen interface{}) string {
 	}
 	genType := reflect.TypeOf(gen)
 	if genType.Kind() != reflect.Func {
+		// We should never get here
 		return "non-function!"
 	}
 	builder := strings.Builder{}

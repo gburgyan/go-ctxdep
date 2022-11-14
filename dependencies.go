@@ -2,6 +2,7 @@ package ctxdep
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"reflect"
 	"sync"
@@ -91,14 +92,33 @@ func (d *DependencyContext) addDependencies(deps []interface{}, immediate bool) 
 }
 
 // addValue adds a direct dependency to the dependency context.
-func (d *DependencyContext) addValue(depType reflect.Type, pDep interface{}) {
+func (d *DependencyContext) addValue(depType reflect.Type, dep interface{}) {
+	kind := depType.Kind()
+	if (kind == reflect.Pointer || kind == reflect.Interface) && reflect.ValueOf(dep).IsNil() {
+		panic(fmt.Sprintf("invalid nil value dependency for type %v", depType))
+	}
+	// A value may override an existing slot.
 	s := &slot{
-		value:    pDep,
+		value:    dep,
 		slotType: depType,
 	}
 	d.slots[depType] = s
 }
 
+// Get behaves like GetWithError except it will panic if the requested dependencies are not
+// found. The typical behavior for a dependency that is not found is returning an error or
+// panicking on the caller's side, so this presents a simplified interface for getting the
+// required dependencies.
+func (d *DependencyContext) Get(ctx context.Context, target ...interface{}) {
+	err := d.GetWithError(ctx, target...)
+	if err != nil {
+		panic(err)
+	}
+}
+
+// GetWithError will try to get the requested dependencies from the  DependencyContext. If it
+// fails to do so it will return an error. This can still panic due to static issues such as
+// if the target is not a pointer to something to be filled.
 func (d *DependencyContext) GetWithError(ctx context.Context, targets ...interface{}) error {
 	for _, target := range targets {
 		err := d.getDependency(ctx, target)
@@ -111,28 +131,17 @@ func (d *DependencyContext) GetWithError(ctx context.Context, targets ...interfa
 	return nil
 }
 
-func (d *DependencyContext) Get(ctx context.Context, target ...interface{}) {
-	err := d.GetWithError(ctx, target...)
-	if err != nil {
-		panic(err)
-	}
-}
-
 func (d *DependencyContext) getDependency(ctx context.Context, target interface{}) error {
-	s := d.findApplicableSlot(target)
-	if s == nil {
+	s, err := d.findApplicableSlot(target)
+	if err != nil {
 		pdc := d.parentDependencyContext()
 		if pdc != nil {
 			return pdc.GetWithError(ctx, target)
 		}
-		return &DependencyError{
-			Message:        "unknown dependency type",
-			ReferencedType: reflect.TypeOf(target),
-			Status:         d.Status(),
-		}
+		return err
 	}
 
-	err := d.getValue(ctx, s, target)
+	err = d.getValue(ctx, s, target)
 	if err != nil {
 		return err
 	}
@@ -143,25 +152,28 @@ func (d *DependencyContext) getDependency(ctx context.Context, target interface{
 // the slot is directly found by the request type, simply return it. Otherwise, look for another
 // slot that can be assigned to the target and return that if fount. Returns nil if
 // nothing is suitable.
-func (d *DependencyContext) findApplicableSlot(target interface{}) (slot *slot) {
+func (d *DependencyContext) findApplicableSlot(target interface{}) (*slot, error) {
 	pt := reflect.TypeOf(target)
 	if pt.Kind() != reflect.Pointer {
-		// TODO: Should this exist?
-		panic("must be a pointer type")
+		panic(fmt.Sprintf("target must be a pointer type: %v", pt))
 	}
 	requestType := pt.Elem()
 
 	if s, ok := d.slots[requestType]; ok {
-		return s
+		return s, nil
 	}
 
 	for slotTarget, s := range d.slots {
 		if requestType.Kind() == reflect.Interface && slotTarget.AssignableTo(requestType) {
-			return s
+			return s, nil
 		}
 	}
 
-	return nil
+	return nil, &DependencyError{
+		Message:        "slot not found for requested type",
+		ReferencedType: requestType,
+		Status:         d.Status(),
+	}
 }
 
 // getValue fills in the target value from this slot. If the value is already there through
@@ -210,21 +222,7 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 		return nil
 	}
 
-	// If we don't have a generator we check the parent context, if it exists,
-	// otherwise return some error.
-	if activeSlot.generator == nil {
-		pdc := d.parentDependencyContext()
-		if pdc != nil {
-			return pdc.getValue(cycleCtx, activeSlot, target)
-		}
-		return &DependencyError{
-			Message:        "no value or generator for dependency",
-			ReferencedType: targetType,
-			Status:         d.Status(),
-		}
-	}
-
-	// We have a generator, so call that to return the values we're interested in.
+	// A slot either has a value or a generator. We don't have a value, so call the generator.
 	results, err := d.invokeSlotGenerator(cycleCtx, activeSlot)
 	if err != nil {
 		return err
@@ -245,7 +243,7 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 	err = d.mapGeneratorResults(results, targetType, targetVal)
 	if err != nil {
 		return &DependencyError{
-			Message:        "error running generator",
+			Message:        "error mapping generator results to context",
 			ReferencedType: activeSlot.slotType,
 			Status:         d.Status(),
 			SourceError:    err,
@@ -265,5 +263,6 @@ func (d *DependencyContext) parentDependencyContext() *DependencyContext {
 	if pdc, ok := pdcAny.(*DependencyContext); ok {
 		return pdc
 	}
+	// There should be no normal way to get to this point.
 	panic("unexpected context value of parent dependency context")
 }

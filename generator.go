@@ -2,6 +2,7 @@ package ctxdep
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 )
 
@@ -36,6 +37,9 @@ func (d *DependencyContext) addGenerator(generatorFunction interface{}, immediat
 	}
 
 	for _, resultType := range resultTypes {
+		if _, existing := d.slots[resultType]; existing {
+			panic(fmt.Sprintf("generator result type %v already exists--a generator may not override an existing slot", resultType))
+		}
 		s := &slot{
 			generator: generatorFunction,
 			slotType:  resultType,
@@ -43,13 +47,14 @@ func (d *DependencyContext) addGenerator(generatorFunction interface{}, immediat
 		}
 		d.slots[resultType] = s
 	}
+	return
 }
 
 // getGeneratorError finds the error result from a generator, if it exists. If no error is present
 // or it doesn't have an error, this returns nil.
 func (d *DependencyContext) getGeneratorError(results []reflect.Value) error {
 	for _, result := range results {
-		if result.CanConvert(errorType) {
+		if result.Type().AssignableTo(errorType) && !result.IsNil() {
 			return result.Convert(errorType).Interface().(error)
 		}
 	}
@@ -134,6 +139,7 @@ func (d *DependencyContext) mapGeneratorResults(results []reflect.Value, targetT
 // is run, we need to ensure that we lock the slots in the same order to prevent deadlocks.
 func (d *DependencyContext) getGeneratorOutputSlots(activeSlot *slot) []*slot {
 	if activeSlot.generator == nil {
+		// There should be no way to get to this point.
 		return nil
 	}
 	generatorType := reflect.TypeOf(activeSlot.generator)
