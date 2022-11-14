@@ -1,4 +1,4 @@
-module GoDepInject
+module godepinject
 
 go 1.18
 
