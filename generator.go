@@ -83,12 +83,19 @@ func (d *DependencyContext) invokeSlotGenerator(ctx context.Context, activeSlot 
 
 // mapGeneratorResults takes the results returned from the generator and fills in the various slots' values
 // from the results.
-func (d *DependencyContext) mapGeneratorResults(results []reflect.Value, targetType reflect.Type, targetVal reflect.Value) {
+func (d *DependencyContext) mapGeneratorResults(results []reflect.Value, targetType reflect.Type, targetVal reflect.Value) error {
 	for _, result := range results {
 		resultType := result.Type()
 		if resultType.AssignableTo(errorType) {
 			// already handled
 			continue
+		}
+		if result.IsNil() {
+			return &DependencyError{
+				Message:        "generator returned nil result",
+				ReferencedType: resultType,
+				Status:         d.Status(),
+			}
 		}
 		if resultType.ConvertibleTo(targetType) {
 			// This is the type that was asked for so fill in the target
@@ -120,6 +127,7 @@ func (d *DependencyContext) mapGeneratorResults(results []reflect.Value, targetT
 			}
 		}
 	}
+	return nil
 }
 
 // getGeneratorOutputSlots gets the slots for the generator of this slot. When a generator

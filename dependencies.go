@@ -242,7 +242,15 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 	}
 
 	// No errors, so gather the results and fill that value in to the dependency context.
-	d.mapGeneratorResults(results, targetType, targetVal)
+	err = d.mapGeneratorResults(results, targetType, targetVal)
+	if err != nil {
+		return &DependencyError{
+			Message:        "error running generator",
+			ReferencedType: activeSlot.slotType,
+			Status:         d.Status(),
+			SourceError:    err,
+		}
+	}
 
 	return nil
 }
