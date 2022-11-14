@@ -90,7 +90,7 @@ func (d *DependencyContext) mapGeneratorResults(results []reflect.Value, targetT
 			// already handled
 			continue
 		}
-		if result.IsNil() {
+		if result.Kind() == reflect.Pointer && result.IsNil() {
 			return &DependencyError{
 				Message:        "generator returned nil result",
 				ReferencedType: resultType,
