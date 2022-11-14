@@ -178,6 +178,21 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 	}
 	defer unlocker()
 
+	targetVal := reflect.ValueOf(target)
+	targetType := reflect.TypeOf(target).Elem()
+
+	// If we have a value in this slot, then we can simply return it without any locking. This
+	// has a slight race condition where a slot's value is added after this check but before
+	// the lock. The same test after the lock makes the race not important.
+	//
+	// This is here as an optimization to prevent the code from acquiring the locks if we
+	// don't need to.
+	if activeSlot.value != nil {
+		slotVal := reflect.ValueOf(activeSlot.value)
+		targetVal.Elem().Set(slotVal)
+		return nil
+	}
+
 	// Preemptively lock all the potential outputs from a generator for this slot, if it exists. We
 	// need to ensure that the locks are acquired in the same order in all cases to prevent potential
 	// deadlocks.
@@ -188,11 +203,7 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 		defer resultSlot.lock.Unlock()
 	}
 
-	targetVal := reflect.ValueOf(target)
-	targetType := reflect.TypeOf(target).Elem()
-
-	// If the slot has a value, either by a direct dependency or filled in by a generator,
-	// then just return that value straight away.
+	// This is the same check as above, but now completely thread safe.
 	if activeSlot.value != nil {
 		slotVal := reflect.ValueOf(activeSlot.value)
 		targetVal.Elem().Set(slotVal)
