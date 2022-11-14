@@ -226,3 +226,23 @@ func TestNonPointerDependencies(t *testing.T) {
 
 	assert.Equal(t, 42, widget.val)
 }
+
+func TestInvalidMultipleGenerators(t *testing.T) {
+	f1 := func() (*testWidget, *testDoodad) { return nil, nil }
+	f2 := func() *testDoodad { return nil }
+
+	// Two functions cannot return the same type, in this case the *testDoodad
+	assert.Panics(t, func() {
+		_ = NewDependencyContext(context.Background(), f1, f2)
+	})
+}
+
+func TestGeneratorReturnNilError(t *testing.T) {
+	f := func() *testDoodad { return nil }
+	ctx := NewDependencyContext(context.Background(), f)
+
+	var doodad *testDoodad
+	err := GetWithError(ctx, &doodad)
+	assert.Error(t, err)
+	assert.Equal(t, "error mapping generator results to context: *ctxdep.testDoodad (generator returned nil result: *ctxdep.testDoodad)", err.Error())
+}
