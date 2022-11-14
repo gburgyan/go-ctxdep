@@ -1,3 +1,5 @@
+![Build status](https://github.com/gburgyan/godepinject/actions/workflows/go.yml/badge.svg)
+
 # GoDepInject
 
 ## Installation
