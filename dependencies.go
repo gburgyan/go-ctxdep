@@ -92,6 +92,7 @@ func (d *DependencyContext) addDependencies(deps []interface{}, immediate bool) 
 
 // addValue adds a direct dependency to the dependency context.
 func (d *DependencyContext) addValue(depType reflect.Type, pDep interface{}) {
+	// A value may override an existing slot.
 	s := &slot{
 		value:    pDep,
 		slotType: depType,
@@ -245,7 +246,7 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 	err = d.mapGeneratorResults(results, targetType, targetVal)
 	if err != nil {
 		return &DependencyError{
-			Message:        "error running generator",
+			Message:        "error mapping generator results to context",
 			ReferencedType: activeSlot.slotType,
 			Status:         d.Status(),
 			SourceError:    err,

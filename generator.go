@@ -2,6 +2,7 @@ package ctxdep
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 )
 
@@ -36,6 +37,9 @@ func (d *DependencyContext) addGenerator(generatorFunction interface{}, immediat
 	}
 
 	for _, resultType := range resultTypes {
+		if _, existing := d.slots[resultType]; existing {
+			panic(fmt.Sprintf("generator result type %v already exists--a generator may not override an existing slot", resultType))
+		}
 		s := &slot{
 			generator: generatorFunction,
 			slotType:  resultType,
@@ -43,6 +47,7 @@ func (d *DependencyContext) addGenerator(generatorFunction interface{}, immediat
 		}
 		d.slots[resultType] = s
 	}
+	return
 }
 
 // getGeneratorError finds the error result from a generator, if it exists. If no error is present
