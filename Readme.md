@@ -16,19 +16,19 @@ It's designed to be simple and intuitive to use both for real code and for unit 
 
 ```Go
 type ImportantData struct {
-	value string
+    value string
 }
 
 func main() {
-	ctx := context.Background()
-	ctx = ctxdep.NewDependencyContext(ctx, &ImportantData{data:"for later"})
-	doStuff(ctx)	
+    ctx := context.Background()
+    ctx = ctxdep.NewDependencyContext(ctx, &ImportantData{data:"for later"})
+    doStuff(ctx)	
 }
 
 func doStuff(ctx context.Context) {
-	var data *ImportantData
+    var data *ImportantData
     ctxdep.Get(ctx, &data)
-	fmt.Printf("Here's the data: %s", data.value)
+    fmt.Printf("Here's the data: %s", data.value)
 }
 ```
 
@@ -84,13 +84,13 @@ func FetchUserData(ctx context.Context) *UserData {
 } 
 
 func HandleRequest(ctx context.Context, request Request) Response {
-	ctx = ctxdep.NewDependencyContext(ctx, Immediate(FetchUserData))
-	// later in processing...
-	
-	var user *UserData
-	// The call to FetchUserData was started at the time the DependencyContext
-	// was instanciated.
-	ctxDep.Get(ctx, &user) 
+    ctx = ctxdep.NewDependencyContext(ctx, Immediate(FetchUserData))
+    // later in processing...
+    
+    var user *UserData
+    // The call to FetchUserData was started at the time the DependencyContext
+    // was instanciated.
+    ctxDep.Get(ctx, &user) 
 }
 ```
 
@@ -111,31 +111,31 @@ This library solves this by introducing generator functions as part of the conte
 
 ```Go
 type UserData struct {
-	Id      int
-	Name    string
-	IsAdmin bool
+    Id      int
+    Name    string
+    IsAdmin bool
 }
 
 func UserDataGenerator(request Request) func(context.Context) UserData {
-	return func(ctx context.Context) (*UserData, error) {
+    return func(ctx context.Context) (*UserData, error) {
         return UserDataService.Lookup(request)
     }
 }
 
 func HandleRequest(ctx context.Context, request Request) Response {
-	ctx = ctxdep.NewDependencyContext(ctx, UserDataGenerator(request))
-	isPermitted(ctx)
-	...
+    ctx = ctxdep.NewDependencyContext(ctx, UserDataGenerator(request))
+    isPermitted(ctx)
+    ...
 }
 
 func isPermitted(ctx context.Context) bool {
-	var user *UserData
+    var user *UserData
     ctxdep.Get(ctx, &user)
-	if user.IsAdmin {
-	    return true	
-	}
-	// other stuff...
-	return false
+    if user.IsAdmin {
+        return true	
+    }
+    // other stuff...
+    return false
 }
 ```
 
@@ -157,10 +157,10 @@ What we can do instead is something like this:
 
 ```Go
 func Test_isPermitted_TestAdmin(t *testing.T) {
-	ctx := ctxdep.NewDependencyContext(context.Background(), &UserData{
-		Id:      42, 
-		Name:    "George Burgyan",
-		IsAdmin: true,
+    ctx := ctxdep.NewDependencyContext(context.Background(), &UserData{
+        Id:      42, 
+        Name:    "George Burgyan",
+        IsAdmin: true,
     })
     permitted := isPermitted(ctx)
     assert.True(t, permitted)
@@ -179,15 +179,15 @@ Another common use case is to have a service facade that is typically accessed b
 type Stuff struct {}
 
 type ServiceAccessor interface {
-	GetStuff(id string) Stuff
+    GetStuff(id string) Stuff
 }
 
 type RealService struct {
 }
 
 func (s *RealService) GetStuff(id string) *Stuff {
-	// call a service
-	return &Stuff{}
+    // call a service
+    return &Stuff{}
 }
 ```
 
@@ -195,15 +195,15 @@ The normal code path can do something like:
 
 ```Go
 func main() {
-	ctx := context.Background()
-	ctx = ctxdep.NewDependencyContext(ctx, &RealService{})
-	client(ctx)
+    ctx := context.Background()
+    ctx = ctxdep.NewDependencyContext(ctx, &RealService{})
+    client(ctx)
 }
 
 func client(ctx context.Context) {
-	var service *ServiceAccessor
+    var service *ServiceAccessor
     ctxdep.Get(ctx, &service)
-	stuff := service.GetStuff("key")
+    stuff := service.GetStuff("key")
 }
 ```
 
@@ -211,7 +211,7 @@ This already is a nice looking function. This is also easy to test now!
 
 ```Go
 type mockService struct {
-	result Stuff
+    result Stuff
 }
 
 func (s *mockService) GetStuff(id string) Stuff {
@@ -219,8 +219,8 @@ func (s *mockService) GetStuff(id string) Stuff {
 }
 
 func Test_client(t *testing.T) {
-	ctx := ctxdep.NewDependencyContext(context.Background(), &mockService{
-	    result: Stuff{}
+    ctx := ctxdep.NewDependencyContext(context.Background(), &mockService{
+        result: Stuff{}
     })
 
     client(ctx)
