@@ -7,7 +7,7 @@ import (
 
 // addGenerator validates the generator function and adds it to the dependency context
 // assuming it's valid. If it's not valid this function panics.
-func (d *DependencyContext) addGenerator(generatorFunction any, immediate bool) {
+func (d *DependencyContext) addGenerator(generatorFunction interface{}, immediate bool) {
 	funcType := reflect.TypeOf(generatorFunction)
 
 	if funcType.Kind() != reflect.Func {

@@ -9,7 +9,7 @@ import (
 // the new context. It also adds any dependencies that are also passed in to the new
 // dependency context. For a further discussion on what dependencies do and how
 // they work, look at the documentation for DependencyContext.
-func NewDependencyContext(ctx context.Context, dependencies ...any) context.Context {
+func NewDependencyContext(ctx context.Context, dependencies ...interface{}) context.Context {
 	dc := &DependencyContext{
 		parentContext: ctx,
 		slots:         map[reflect.Type]*slot{},
@@ -38,7 +38,7 @@ func GetDependencyContext(ctx context.Context) *DependencyContext {
 // found. The typical behavior for a dependency that is not found is returning an error or
 // panicking on the caller's side, so this presents a simplified interface for getting the
 // required dependencies.
-func Get(ctx context.Context, target ...any) {
+func Get(ctx context.Context, target ...interface{}) {
 	err := GetWithError(ctx, target...)
 	if err != nil {
 		panic(err)
@@ -49,7 +49,7 @@ func Get(ctx context.Context, target ...any) {
 // DependencyContext. If it fails to do so it will return an error. If the context's
 // DependencyContext is not found, this will still panic as its preconditions were
 // very much not met.
-func GetWithError(ctx context.Context, target ...any) error {
+func GetWithError(ctx context.Context, target ...interface{}) error {
 	dc := GetDependencyContext(ctx)
 	return dc.GetWithError(ctx, target...)
 }

@@ -46,7 +46,7 @@ func (d *DependencyContext) Status() string {
 // formatGeneratorDebug simply returns a string representation of a generator. This is
 // used instead of the native `%#v` formatter to not return the raw address of the generator
 // as that's not important for this and simplifies testing.
-func formatGeneratorDebug(gen any) string {
+func formatGeneratorDebug(gen interface{}) string {
 	if gen == nil {
 		return "-"
 	}

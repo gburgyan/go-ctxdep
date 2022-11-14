@@ -56,8 +56,8 @@ type DependencyContext struct {
 
 // slot stored the internal state of a dependency slot.
 type slot struct {
-	value     any
-	generator any
+	value     interface{}
+	generator interface{}
 	slotType  reflect.Type
 	lock      sync.Mutex
 	immediate bool
@@ -69,12 +69,12 @@ var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 // AddDependencies adds the given dependencies to the context. This will add all the deps
 // passed in and treat them as a generator if it's a function or a direct dependency
 // if it's not.
-func (d *DependencyContext) AddDependencies(ctx context.Context, deps ...any) {
+func (d *DependencyContext) AddDependencies(ctx context.Context, deps ...interface{}) {
 	d.addDependencies(deps, false)
 	d.resolveImmediateDependencies(ctx)
 }
 
-func (d *DependencyContext) addDependencies(deps []any, immediate bool) {
+func (d *DependencyContext) addDependencies(deps []interface{}, immediate bool) {
 	for _, dep := range deps {
 		if immediateDependencies, ok := dep.(*immediateDependencies); ok {
 			d.addDependencies(immediateDependencies.dependencies, true)
@@ -91,7 +91,7 @@ func (d *DependencyContext) addDependencies(deps []any, immediate bool) {
 }
 
 // addValue adds a direct dependency to the dependency context.
-func (d *DependencyContext) addValue(depType reflect.Type, pDep any) {
+func (d *DependencyContext) addValue(depType reflect.Type, pDep interface{}) {
 	s := &slot{
 		value:    pDep,
 		slotType: depType,
@@ -99,7 +99,7 @@ func (d *DependencyContext) addValue(depType reflect.Type, pDep any) {
 	d.slots[depType] = s
 }
 
-func (d *DependencyContext) GetWithError(ctx context.Context, targets ...any) error {
+func (d *DependencyContext) GetWithError(ctx context.Context, targets ...interface{}) error {
 	for _, target := range targets {
 		err := d.getDependency(ctx, target)
 		if err != nil {
@@ -111,14 +111,14 @@ func (d *DependencyContext) GetWithError(ctx context.Context, targets ...any) er
 	return nil
 }
 
-func (d *DependencyContext) Get(ctx context.Context, target ...any) {
+func (d *DependencyContext) Get(ctx context.Context, target ...interface{}) {
 	err := d.GetWithError(ctx, target...)
 	if err != nil {
 		panic(err)
 	}
 }
 
-func (d *DependencyContext) getDependency(ctx context.Context, target any) error {
+func (d *DependencyContext) getDependency(ctx context.Context, target interface{}) error {
 	s := d.findApplicableSlot(target)
 	if s == nil {
 		pdc := d.parentDependencyContext()
@@ -143,7 +143,7 @@ func (d *DependencyContext) getDependency(ctx context.Context, target any) error
 // the slot is directly found by the request type, simply return it. Otherwise, look for another
 // slot that can be assigned to the target and return that if fount. Returns nil if
 // nothing is suitable.
-func (d *DependencyContext) findApplicableSlot(target any) (slot *slot) {
+func (d *DependencyContext) findApplicableSlot(target interface{}) (slot *slot) {
 	pt := reflect.TypeOf(target)
 	if pt.Kind() != reflect.Pointer {
 		// TODO: Should this exist?
@@ -169,7 +169,7 @@ func (d *DependencyContext) findApplicableSlot(target any) (slot *slot) {
 // either use the generator to make a value or delegate to an upstream DependencyContext.
 // The precondition for the function is that the slot's type matches the target such that the
 // slot can be assigned to target.
-func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, target any) error {
+func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, target interface{}) error {
 	// Before locking this slot, ensure that we're not in a cyclic dependency. If we are,
 	// return an error. Otherwise, the lock call would deadlock.
 	cycleCtx, unlocker, err := enterSlotProcessing(ctx, activeSlot)
