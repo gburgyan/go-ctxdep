@@ -1,6 +1,6 @@
 ![Build status](https://github.com/gburgyan/go-ctxdep/actions/workflows/go.yml/badge.svg)
 
-# GoDepInject
+# Go Context Dependencies
 
 ## Installation
 
