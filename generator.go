@@ -54,7 +54,7 @@ func (d *DependencyContext) addGenerator(generatorFunction interface{}, immediat
 // or it doesn't have an error, this returns nil.
 func (d *DependencyContext) getGeneratorError(results []reflect.Value) error {
 	for _, result := range results {
-		if result.CanConvert(errorType) {
+		if result.Type().AssignableTo(errorType) && !result.IsNil() {
 			return result.Convert(errorType).Interface().(error)
 		}
 	}
@@ -139,6 +139,7 @@ func (d *DependencyContext) mapGeneratorResults(results []reflect.Value, targetT
 // is run, we need to ensure that we lock the slots in the same order to prevent deadlocks.
 func (d *DependencyContext) getGeneratorOutputSlots(activeSlot *slot) []*slot {
 	if activeSlot.generator == nil {
+		// There should be no way to get to this point.
 		return nil
 	}
 	generatorType := reflect.TypeOf(activeSlot.generator)

@@ -112,6 +112,22 @@ func TestDependencyContext_ErrorFromGenerator(t *testing.T) {
 	})
 }
 
+func TestDependencyContext_GeneratorWithError(t *testing.T) {
+	calls := 0
+	creator := func(ctx context.Context) (*testWidget, *testDoodad, error) {
+		calls++
+		return &testWidget{val: 42}, &testDoodad{val: "myval"}, nil
+	}
+
+	ctx := NewDependencyContext(context.Background(), creator)
+
+	var doodad *testDoodad
+	var widget *testWidget
+	Get(ctx, &doodad, &widget)
+	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, "myval", doodad.val)
+}
+
 func TestDependencyContext_RelatedDependencyGenerator(t *testing.T) {
 	ctx := NewDependencyContext(context.Background(), func(ctx context.Context) *tempImpl {
 		return &tempImpl{}
@@ -245,4 +261,13 @@ func TestGeneratorReturnNilError(t *testing.T) {
 	err := GetWithError(ctx, &doodad)
 	assert.Error(t, err)
 	assert.Equal(t, "error mapping generator results to context: *ctxdep.testDoodad (generator returned nil result: *ctxdep.testDoodad)", err.Error())
+}
+
+func TestUnknownDependencies(t *testing.T) {
+	ctx := NewDependencyContext(context.Background(), func() testWidget { return testWidget{val: 42} })
+
+	var doodad *testDoodad
+	err := GetWithError(ctx, &doodad)
+	assert.Error(t, err)
+	assert.Equal(t, "slot not found for requested type: *ctxdep.testDoodad", err.Error())
 }
