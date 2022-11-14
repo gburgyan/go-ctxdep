@@ -4,6 +4,10 @@
 
 ## Installation
 
+```bash
+go get github.com/gburgyan/go-ctxdep
+```
+
 ## Features
 
 The basic feature of the GoDepInject library is to provide a simple way to access needed dependencies far away from the creation of those dependencies. It provides ways of injecting direct dependencies, which are simply instances of objects that can be pulled out later. For objects that may be more costly to generate dependencies can be represented by generators that are called when they are first references. In cases where you know an expensive dependency is needed, you can mark the generator to run immediately which will fire off the generator in a background goroutine to be able to give it as much of a head start as possible.
