@@ -29,6 +29,7 @@ func GetDependencyContext(ctx context.Context) *DependencyContext {
 	}
 	dc, ok := value.(*DependencyContext)
 	if !ok {
+		// We should never get here.
 		panic("dependency context unexpected type")
 	}
 	return dc
@@ -48,7 +49,8 @@ func Get(ctx context.Context, target ...interface{}) {
 // GetWithError will try to get the requested dependencies from the context's
 // DependencyContext. If it fails to do so it will return an error. If the context's
 // DependencyContext is not found, this will still panic as its preconditions were
-// very much not met.
+// not met. Similarly, if the target isn't a pointer to something, that will also trigger
+// a panic.
 func GetWithError(ctx context.Context, target ...interface{}) error {
 	dc := GetDependencyContext(ctx)
 	return dc.GetWithError(ctx, target...)

@@ -27,14 +27,28 @@ func (t tempImpl) getVal() int {
 	return 105
 }
 
-func TestDependencyContext_GeneratorAndObject(t *testing.T) {
+func Test_SimpleObject(t *testing.T) {
+	ctx := NewDependencyContext(context.Background(), &testWidget{val: 42})
+
+	var widget *testWidget
+	Get(ctx, &widget)
+	assert.Equal(t, 42, widget.val)
+
+	dc := GetDependencyContext(ctx)
+	widget = nil
+	dc.Get(ctx, &widget)
+	assert.Equal(t, 42, widget.val)
+
+	assert.Equal(t, "*ctxdep.testWidget - value: true - generator: -", Status(ctx))
+}
+
+func Test_GeneratorAndObject(t *testing.T) {
 	ctx := NewDependencyContext(context.Background(), func() *testWidget {
 		return &testWidget{val: 42}
 	}, &tempImpl{})
 
 	var widget *testWidget
 	Get(ctx, &widget)
-
 	assert.Equal(t, 42, widget.val)
 
 	var iface tempInterface
@@ -42,7 +56,7 @@ func TestDependencyContext_GeneratorAndObject(t *testing.T) {
 	assert.Equal(t, 105, iface.getVal())
 }
 
-func TestDependencyContext_AddGenerator_MultiOutput(t *testing.T) {
+func Test_AddGenerator_MultiOutput(t *testing.T) {
 	calls := 0
 	creator := func(ctx context.Context) (*testWidget, *testDoodad) {
 		calls++
@@ -62,7 +76,7 @@ func TestDependencyContext_AddGenerator_MultiOutput(t *testing.T) {
 	assert.Equal(t, 1, calls)
 }
 
-func TestDependencyContext_AddGenerator_Error(t *testing.T) {
+func Test_AddGenerator_OnlyError(t *testing.T) {
 	// No valid return types
 	assert.Panics(t, func() {
 		NewDependencyContext(context.Background(), func(ctx context.Context) error {
@@ -78,7 +92,7 @@ func TestDependencyContext_AddGenerator_Error(t *testing.T) {
 	})
 }
 
-func TestDependencyContext_AddGenerator_MultiRequest(t *testing.T) {
+func Test_Generator_MultipleRequests(t *testing.T) {
 	calls := 0
 	creator := func(ctx context.Context) (*testWidget, *testDoodad) {
 		calls++
@@ -96,7 +110,7 @@ func TestDependencyContext_AddGenerator_MultiRequest(t *testing.T) {
 	assert.Equal(t, 1, calls)
 }
 
-func TestDependencyContext_ErrorFromGenerator(t *testing.T) {
+func Test_GeneratorWithError_Error(t *testing.T) {
 	calls := 0
 	creator := func(ctx context.Context) (*testWidget, *testDoodad, error) {
 		calls++
@@ -110,9 +124,14 @@ func TestDependencyContext_ErrorFromGenerator(t *testing.T) {
 	assert.Panics(t, func() {
 		Get(ctx, &doodad, &widget)
 	})
+
+	dc := GetDependencyContext(ctx)
+	assert.Panics(t, func() {
+		dc.Get(ctx, &doodad, &widget)
+	})
 }
 
-func TestDependencyContext_GeneratorWithError(t *testing.T) {
+func Test_GeneratorWithError_NoError(t *testing.T) {
 	calls := 0
 	creator := func(ctx context.Context) (*testWidget, *testDoodad, error) {
 		calls++
@@ -128,7 +147,7 @@ func TestDependencyContext_GeneratorWithError(t *testing.T) {
 	assert.Equal(t, "myval", doodad.val)
 }
 
-func TestDependencyContext_RelatedDependencyGenerator(t *testing.T) {
+func Test_RelatedInterfaceGenerator(t *testing.T) {
 	ctx := NewDependencyContext(context.Background(), func(ctx context.Context) *tempImpl {
 		return &tempImpl{}
 	})
@@ -139,13 +158,14 @@ func TestDependencyContext_RelatedDependencyGenerator(t *testing.T) {
 	assert.Equal(t, 105, iface.getVal())
 }
 
-func TestMultiLevelDeps(t *testing.T) {
+func Test_MultiLevelDependencies(t *testing.T) {
 	f1 := func(ctx context.Context) *testWidget {
 		return &testWidget{
 			val: 42,
 		}
 	}
 
+	// Create another dependency context that is also on the context stack.
 	f2 := func(ctx context.Context, widget *testWidget) *testDoodad {
 		return &testDoodad{
 			val: fmt.Sprintf("%d", widget.val),
@@ -160,7 +180,7 @@ func TestMultiLevelDeps(t *testing.T) {
 	assert.Equal(t, "42", doodad.val)
 }
 
-func TestCyclicDependencies_params(t *testing.T) {
+func Test_CyclicDependencies_FromParams(t *testing.T) {
 	f1 := func(ctx context.Context, doodad *testDoodad) *testWidget {
 		val, _ := strconv.Atoi(doodad.val)
 		return &testWidget{
@@ -183,7 +203,7 @@ func TestCyclicDependencies_params(t *testing.T) {
 	assert.Equal(t, "cyclic dependency error getting slot: *ctxdep.testWidget", err.Error())
 }
 
-func TestCyclicDependencies_implicit(t *testing.T) {
+func Test_CyclicDependencies_Implicit(t *testing.T) {
 	f1 := func(ctx context.Context) (*testWidget, error) {
 		var doodad *testDoodad
 		err := GetWithError(ctx, &doodad)
@@ -220,7 +240,7 @@ func TestCyclicDependencies_implicit(t *testing.T) {
 	assert.Equal(t, "error running generator: *ctxdep.testWidget (error running generator: *ctxdep.testDoodad (cyclic dependency error getting slot: *ctxdep.testWidget))", err.Error())
 }
 
-func TestMultiLevelDependencies(t *testing.T) {
+func Test_MultiLevelDependencies_Param(t *testing.T) {
 	c1 := NewDependencyContext(context.Background(), func() *testWidget { return &testWidget{val: 42} })
 
 	c2 := NewDependencyContext(c1, func(w *testWidget) *testDoodad { return &testDoodad{val: fmt.Sprintf("Doodad: %d", w.val)} })
@@ -234,7 +254,7 @@ func TestMultiLevelDependencies(t *testing.T) {
 
 // While the intent is to store pointers to objects and not objects themselves to prevent copying,
 // verify that objects work as well.
-func TestNonPointerDependencies(t *testing.T) {
+func Test_NonPointerDependencies(t *testing.T) {
 	ctx := NewDependencyContext(context.Background(), func() testWidget { return testWidget{val: 42} })
 
 	var widget testWidget
@@ -243,7 +263,7 @@ func TestNonPointerDependencies(t *testing.T) {
 	assert.Equal(t, 42, widget.val)
 }
 
-func TestInvalidMultipleGenerators(t *testing.T) {
+func Test_MultipleGenerators_Invalid(t *testing.T) {
 	f1 := func() (*testWidget, *testDoodad) { return nil, nil }
 	f2 := func() *testDoodad { return nil }
 
@@ -253,7 +273,7 @@ func TestInvalidMultipleGenerators(t *testing.T) {
 	})
 }
 
-func TestGeneratorReturnNilError(t *testing.T) {
+func Test_GeneratorReturnNil(t *testing.T) {
 	f := func() *testDoodad { return nil }
 	ctx := NewDependencyContext(context.Background(), f)
 
@@ -263,11 +283,35 @@ func TestGeneratorReturnNilError(t *testing.T) {
 	assert.Equal(t, "error mapping generator results to context: *ctxdep.testDoodad (generator returned nil result: *ctxdep.testDoodad)", err.Error())
 }
 
-func TestUnknownDependencies(t *testing.T) {
+func Test_UnknownDependencies(t *testing.T) {
 	ctx := NewDependencyContext(context.Background(), func() testWidget { return testWidget{val: 42} })
 
 	var doodad *testDoodad
 	err := GetWithError(ctx, &doodad)
 	assert.Error(t, err)
 	assert.Equal(t, "slot not found for requested type: *ctxdep.testDoodad", err.Error())
+}
+
+func Test_NoDependencyContext(t *testing.T) {
+	ctx := context.Background()
+	var widget *testWidget
+	assert.Panics(t, func() {
+		Get(ctx, &widget)
+	})
+}
+
+func Test_AddNilDependency(t *testing.T) {
+	var nilWidget *testWidget
+	assert.Panics(t, func() {
+		NewDependencyContext(context.Background(), nilWidget)
+	})
+}
+
+func Test_NonPointerGet(t *testing.T) {
+	ctx := NewDependencyContext(context.Background(), func() testWidget { return testWidget{val: 42} })
+
+	var doodad testDoodad
+	assert.Panics(t, func() {
+		Get(ctx, doodad)
+	})
 }

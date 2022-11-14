@@ -94,7 +94,7 @@ func (d *DependencyContext) addDependencies(deps []interface{}, immediate bool) 
 // addValue adds a direct dependency to the dependency context.
 func (d *DependencyContext) addValue(depType reflect.Type, dep interface{}) {
 	kind := depType.Kind()
-	if (kind == reflect.Pointer || kind == reflect.Interface) && dep == nil {
+	if (kind == reflect.Pointer || kind == reflect.Interface) && reflect.ValueOf(dep).IsNil() {
 		panic(fmt.Sprintf("invalid nil value dependency for type %v", depType))
 	}
 	// A value may override an existing slot.
@@ -105,6 +105,20 @@ func (d *DependencyContext) addValue(depType reflect.Type, dep interface{}) {
 	d.slots[depType] = s
 }
 
+// Get behaves like GetWithError except it will panic if the requested dependencies are not
+// found. The typical behavior for a dependency that is not found is returning an error or
+// panicking on the caller's side, so this presents a simplified interface for getting the
+// required dependencies.
+func (d *DependencyContext) Get(ctx context.Context, target ...interface{}) {
+	err := d.GetWithError(ctx, target...)
+	if err != nil {
+		panic(err)
+	}
+}
+
+// GetWithError will try to get the requested dependencies from the  DependencyContext. If it
+// fails to do so it will return an error. This can still panic due to static issues such as
+// if the target is not a pointer to something to be filled.
 func (d *DependencyContext) GetWithError(ctx context.Context, targets ...interface{}) error {
 	for _, target := range targets {
 		err := d.getDependency(ctx, target)
@@ -115,13 +129,6 @@ func (d *DependencyContext) GetWithError(ctx context.Context, targets ...interfa
 	log.Default()
 
 	return nil
-}
-
-func (d *DependencyContext) Get(ctx context.Context, target ...interface{}) {
-	err := d.GetWithError(ctx, target...)
-	if err != nil {
-		panic(err)
-	}
 }
 
 func (d *DependencyContext) getDependency(ctx context.Context, target interface{}) error {
