@@ -122,10 +122,12 @@ func (d *DependencyContext) mapGeneratorResults(results []reflect.Value, targetT
 	}
 }
 
-// getGeneratorAdditionalOutputSlots gets the slots for the generator of this slot that
-// are not specifically for *this* slot. This is used to lock the other slots when calling
-// the generator for the other slots for thread safety.
-func (d *DependencyContext) getGeneratorAdditionalOutputSlots(activeSlot *slot) []*slot {
+// getGeneratorOutputSlots gets the slots for the generator of this slot. When a generator
+// is run, we need to ensure that we lock the slots in the same order to prevent deadlocks.
+func (d *DependencyContext) getGeneratorOutputSlots(activeSlot *slot) []*slot {
+	if activeSlot.generator == nil {
+		return nil
+	}
 	generatorType := reflect.TypeOf(activeSlot.generator)
 	var result []*slot
 	retVals := generatorType.NumOut()
@@ -133,10 +135,6 @@ func (d *DependencyContext) getGeneratorAdditionalOutputSlots(activeSlot *slot) 
 		retType := generatorType.Out(i)
 		if retType.AssignableTo(errorType) {
 			// Errors are not a type of slot.
-			continue
-		}
-		if retType == activeSlot.slotType {
-			// This would have been locked already
 			continue
 		}
 		result = append(result, d.slots[retType])

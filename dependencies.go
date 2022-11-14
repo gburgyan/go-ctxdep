@@ -178,9 +178,15 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 	}
 	defer unlocker()
 
-	// Ensure thread safety for this slot. If we run a generator, we'll lock those later.
-	activeSlot.lock.Lock()
-	defer activeSlot.lock.Unlock()
+	// Preemptively lock all the potential outputs from a generator for this slot, if it exists. We
+	// need to ensure that the locks are acquired in the same order in all cases to prevent potential
+	// deadlocks.
+	resultSlots := d.getGeneratorOutputSlots(activeSlot)
+	for _, resultSlot := range resultSlots {
+		resultSlot.lock.Lock()
+		//goland:noinspection GoDeferInLoop
+		defer resultSlot.lock.Unlock()
+	}
 
 	targetVal := reflect.ValueOf(target)
 	targetType := reflect.TypeOf(target).Elem()
@@ -205,13 +211,6 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 			ReferencedType: targetType,
 			Status:         d.Status(),
 		}
-	}
-
-	resultSlots := d.getGeneratorAdditionalOutputSlots(activeSlot)
-	for _, resultSlot := range resultSlots {
-		resultSlot.lock.Lock()
-		//goland:noinspection GoDeferInLoop
-		defer resultSlot.lock.Unlock()
 	}
 
 	// We have a generator, so call that to return the values we're interested in.
