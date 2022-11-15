@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Benchmark go-ctxdep" type="GoTestRunConfiguration" factoryName="Go Test">
-    <module name="godepinject" />
+    <module name="go-ctxdep" />
     <working_directory value="$PROJECT_DIR$" />
     <kind value="PACKAGE" />
     <package value="github.com/gburgyan/go-ctxdep" />
