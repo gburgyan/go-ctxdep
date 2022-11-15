@@ -129,7 +129,7 @@ func (d *DependencyContext) GetBatchWithError(ctx context.Context, targets ...an
 }
 
 func (d *DependencyContext) getDependency(ctx context.Context, target any) error {
-	s, err := d.findApplicableSlot(target)
+	s, t, err := d.findApplicableSlot(target)
 	if err != nil {
 		pdc := d.parentDependencyContext()
 		if pdc != nil {
@@ -138,7 +138,7 @@ func (d *DependencyContext) getDependency(ctx context.Context, target any) error
 		return err
 	}
 
-	err = d.getValue(ctx, s, target)
+	err = d.getValue(ctx, s, t, target)
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func (d *DependencyContext) getDependency(ctx context.Context, target any) error
 // the slot is directly found by the request type, simply return it. Otherwise, look for another
 // slot that can be assigned to the target and return that if fount. Returns nil if
 // nothing is suitable.
-func (d *DependencyContext) findApplicableSlot(target any) (*slot, error) {
+func (d *DependencyContext) findApplicableSlot(target any) (*slot, reflect.Type, error) {
 	pt := reflect.TypeOf(target)
 	if pt.Kind() != reflect.Pointer {
 		panic(fmt.Sprintf("target must be a pointer type: %v", pt))
@@ -157,16 +157,16 @@ func (d *DependencyContext) findApplicableSlot(target any) (*slot, error) {
 	requestType := pt.Elem()
 
 	if s, ok := d.slots[requestType]; ok {
-		return s, nil
+		return s, requestType, nil
 	}
 
 	for slotTarget, s := range d.slots {
 		if requestType.Kind() == reflect.Interface && slotTarget.AssignableTo(requestType) {
-			return s, nil
+			return s, requestType, nil
 		}
 	}
 
-	return nil, &DependencyError{
+	return nil, nil, &DependencyError{
 		Message:        "slot not found for requested type",
 		ReferencedType: requestType,
 		Status:         d.Status(),
@@ -178,9 +178,8 @@ func (d *DependencyContext) findApplicableSlot(target any) (*slot, error) {
 // either use the generator to make a value or delegate to an upstream DependencyContext.
 // The precondition for the function is that the slot's type matches the target such that the
 // slot can be assigned to target.
-func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, target any) error {
+func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targetType reflect.Type, target any) error {
 	targetVal := reflect.ValueOf(target)
-	targetType := reflect.TypeOf(target).Elem()
 
 	// If we have a value in this slot, then we can simply return it without any locking. This
 	// has a slight race condition where a slot's value is added after this check but before

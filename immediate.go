@@ -33,7 +33,7 @@ func (d *DependencyContext) resolveImmediateDependencies(ctx context.Context) {
 		if slot.immediate {
 			go func() {
 				target := reflect.New(slot.slotType)
-				err := d.getValue(ctx, slot, target.Interface())
+				err := d.getValue(ctx, slot, slot.slotType, target.Interface())
 				if err != nil {
 					// The best we can do is ignore this for now since we're
 					// inside nested goroutines and the original call has returned.
