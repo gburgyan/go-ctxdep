@@ -9,7 +9,7 @@ import (
 // the new context. It also adds any dependencies that are also passed in to the new
 // dependency context. For a further discussion on what dependencies do and how
 // they work, look at the documentation for DependencyContext.
-func NewDependencyContext(ctx context.Context, dependencies ...interface{}) context.Context {
+func NewDependencyContext(ctx context.Context, dependencies ...any) context.Context {
 	dc := &DependencyContext{
 		parentContext: ctx,
 		slots:         map[reflect.Type]*slot{},
@@ -35,25 +35,41 @@ func GetDependencyContext(ctx context.Context) *DependencyContext {
 	return dc
 }
 
-// Get behaves like GetWithError except it will panic if the requested dependencies are not
+// GetBatch behaves like GetBatchWithError except it will panic if the requested dependencies are not
 // found. The typical behavior for a dependency that is not found is returning an error or
 // panicking on the caller's side, so this presents a simplified interface for getting the
 // required dependencies.
-func Get(ctx context.Context, target ...interface{}) {
-	err := GetWithError(ctx, target...)
+func GetBatch(ctx context.Context, target ...any) {
+	err := GetBatchWithError(ctx, target...)
 	if err != nil {
 		panic(err)
 	}
 }
 
-// GetWithError will try to get the requested dependencies from the context's
+// Get returns the value of type T from the dependency context. It otherwise behaves exactly like
+// GetBatch, but it only has the capability of returning a single value.
+func Get[T any](ctx context.Context) T {
+	var target T
+	GetBatch(ctx, &target)
+	return target
+}
+
+// GetBatchWithError will try to get the requested dependencies from the context's
 // DependencyContext. If it fails to do so it will return an error. If the context's
 // DependencyContext is not found, this will still panic as its preconditions were
 // not met. Similarly, if the target isn't a pointer to something, that will also trigger
 // a panic.
-func GetWithError(ctx context.Context, target ...interface{}) error {
+func GetBatchWithError(ctx context.Context, target ...any) error {
 	dc := GetDependencyContext(ctx)
-	return dc.GetWithError(ctx, target...)
+	return dc.GetBatchWithError(ctx, target...)
+}
+
+// GetWithError returns the value of type T from the dependency context. It otherwise behaves exactly like
+// GetBatchWithError, but it only has the capability of returning a single value and an error object.
+func GetWithError[T any](ctx context.Context) (T, error) {
+	var target T
+	err := GetBatchWithError(ctx, &target)
+	return target, err
 }
 
 // Status is a diagnostic tool that returns a string describing the state of the dependency

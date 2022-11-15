@@ -9,12 +9,12 @@ import (
 // that these dependencies should immediately be resolved. This is created by
 // Immediate()
 type immediateDependencies struct {
-	dependencies []interface{}
+	dependencies []any
 }
 
 // Immediate is used to signal the DependencyContext to call the specified generators
 // immediately to resolve the dependencies in a new goroutine.
-func Immediate(deps ...interface{}) *immediateDependencies {
+func Immediate(deps ...any) *immediateDependencies {
 	return &immediateDependencies{
 		dependencies: deps,
 	}

@@ -10,9 +10,13 @@ go get github.com/gburgyan/go-ctxdep
 
 ## Features
 
-The basic feature of the GoDepInject library is to provide a simple way to access needed dependencies far away from the creation of those dependencies. It provides ways of injecting direct dependencies, which are simply instances of objects that can be pulled out later. For objects that may be more costly to generate dependencies can be represented by generators that are called when they are first references. In cases where you know an expensive dependency is needed, you can mark the generator to run immediately which will fire off the generator in a background goroutine to be able to give it as much of a head start as possible.
+Go already has a nice way to keep track of things in your context: `context.Context`. This adds some helpers to that to simplify getting things out of that context that is already being passed around.
 
-All this is done so the calling code is as simple and intuitive as possible.
+The fundamental as
+
+The basic feature of the go-ctxdep library is to provide a simple way to access needed dependencies away from the creation of those dependencies. It provides ways of putting dependencies, which are simply instances of objects that can be pulled out later, into the context that is already there. For objects that may be more costly to generate dependencies can be represented by generators that are called when they are first referenced. In cases where you know an expensive dependency is needed, you can mark the generator to run immediately which will fire off the generator in a background goroutine to be able to give it as much of a head start as possible.
+
+All this is done so the calling code is as simple and intuitive as possible and relying on as little magic as practical. There is no configuration to go wrong and everything is in code to clearly show the intent of the users of this class.
 
 ## Usage
 
@@ -30,8 +34,7 @@ func main() {
 }
 
 func doStuff(ctx context.Context) {
-    var data *ImportantData
-    ctxdep.Get(ctx, &data)
+    data := ctxdep.Get[*ImportantData](ctx)
     fmt.Printf("Here's the data: %s", data.value)
 }
 ```
@@ -83,18 +86,19 @@ To create an immediate dependency, simply wrap the generators with a call to `Im
 type UserData struct{}
 
 func FetchUserData(ctx context.Context) *UserData {
-  // some longer processing to get user's data
-  return &UserData{}
+    // some longer processing to get user's data
+    return &UserData{}
 } 
 
 func HandleRequest(ctx context.Context, request Request) Response {
     ctx = ctxdep.NewDependencyContext(ctx, Immediate(FetchUserData))
-    // later in processing...
-    
-    var user *UserData
+    process(ctx)
+}
+
+func process(ctx context.Context)
     // The call to FetchUserData was started at the time the DependencyContext
     // was instanciated.
-    ctxDep.Get(ctx, &user) 
+    user := ctxDep.Get[*UserData](ctx) 
 }
 ```
 
@@ -133,8 +137,7 @@ func HandleRequest(ctx context.Context, request Request) Response {
 }
 
 func isPermitted(ctx context.Context) bool {
-    var user *UserData
-    ctxdep.Get(ctx, &user)
+    user := ctxdep.Get[*UserData](ctx)
     if user.IsAdmin {
         return true	
     }
@@ -171,13 +174,13 @@ func Test_isPermitted_TestAdmin(t *testing.T) {
 }
 ```
 
-Even though in the production code path the user is filled in with a generator, the testing code can easily inject new test data using the direct injection technique.
+Even though in the production code path the user is filled in with a generator, the testing code can easily add new test data using the direct dependency technique.
 
 Additionally, even if the production code uses a generator to fulfil the requested object, a test can just as easily use a direct dependency for that object.
 
 ### Access to a service facade
 
-Another common use case is to have a service facade that is typically accessed by a global package. By moving the facade to the dependency context we can inject a test version of it as long as it's implements the same interface
+Another common use case is to have a service facade that is typically accessed by a global package. By moving the facade to the dependency context we can use a test version of it as long as it's implements the same interface:
 
 ```Go
 type Stuff struct {}
@@ -205,8 +208,7 @@ func main() {
 }
 
 func client(ctx context.Context) {
-    var service *ServiceAccessor
-    ctxdep.Get(ctx, &service)
+    service := ctxdep.Get[*ServiceAccessor](ctx)
     stuff := service.GetStuff("key")
 }
 ```

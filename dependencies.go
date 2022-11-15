@@ -11,15 +11,15 @@ type key int
 
 const dependencyContextKey key = 0
 
-// DependencyContext is the mediator of the dependency injection framework in this library.
+// DependencyContext is the mediator of the dependency tracking framework in this library.
 // It maintains a collection of dependencies that were introduced to the context as well
 // as generators that can be used to lazily create the dependencies as they are needed.
 //
 // Dependencies come in two forms:
-//   - Directly injected dependencies
+//   - Directly dependencies
 //   - Generator-based dependencies
 //
-// A directly injected dependency is simply an object that is inserted into the context
+// A direct dependency is simply an object that is inserted into the context
 // and can be searched for by type.
 //
 // A generator-based dependency is a function that is added to the context that can be
@@ -37,7 +37,7 @@ const dependencyContextKey key = 0
 // Generators may also be wrapped with Immediate() which will cause the generators passed
 // to it to be called immediately in a different goroutine.
 //
-// If a type is requested that is not directly found as either a directly injected
+// If a type is requested that is not directly found as either a direct dependency
 // or generator-based dependency, then a search if conducted to see if any dependency may
 // be cast to the requested type. If a suitable dependency is found, that will be returned.
 // This can be the case if a dependency is a struct that implements an interface--if an
@@ -56,8 +56,8 @@ type DependencyContext struct {
 
 // slot stored the internal state of a dependency slot.
 type slot struct {
-	value     interface{}
-	generator interface{}
+	value     any
+	generator any
 	slotType  reflect.Type
 	lock      sync.Mutex
 	immediate bool
@@ -69,12 +69,12 @@ var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 // AddDependencies adds the given dependencies to the context. This will add all the deps
 // passed in and treat them as a generator if it's a function or a direct dependency
 // if it's not.
-func (d *DependencyContext) AddDependencies(ctx context.Context, deps ...interface{}) {
+func (d *DependencyContext) AddDependencies(ctx context.Context, deps ...any) {
 	d.addDependencies(deps, false)
 	d.resolveImmediateDependencies(ctx)
 }
 
-func (d *DependencyContext) addDependencies(deps []interface{}, immediate bool) {
+func (d *DependencyContext) addDependencies(deps []any, immediate bool) {
 	for _, dep := range deps {
 		if immediateDependencies, ok := dep.(*immediateDependencies); ok {
 			d.addDependencies(immediateDependencies.dependencies, true)
@@ -91,7 +91,7 @@ func (d *DependencyContext) addDependencies(deps []interface{}, immediate bool) 
 }
 
 // addValue adds a direct dependency to the dependency context.
-func (d *DependencyContext) addValue(depType reflect.Type, dep interface{}) {
+func (d *DependencyContext) addValue(depType reflect.Type, dep any) {
 	kind := depType.Kind()
 	if (kind == reflect.Pointer || kind == reflect.Interface) && reflect.ValueOf(dep).IsNil() {
 		panic(fmt.Sprintf("invalid nil value dependency for type %v", depType))
@@ -104,21 +104,21 @@ func (d *DependencyContext) addValue(depType reflect.Type, dep interface{}) {
 	d.slots[depType] = s
 }
 
-// Get behaves like GetWithError except it will panic if the requested dependencies are not
+// GetBatch behaves like GetBatchWithError except it will panic if the requested dependencies are not
 // found. The typical behavior for a dependency that is not found is returning an error or
 // panicking on the caller's side, so this presents a simplified interface for getting the
 // required dependencies.
-func (d *DependencyContext) Get(ctx context.Context, target ...interface{}) {
-	err := d.GetWithError(ctx, target...)
+func (d *DependencyContext) GetBatch(ctx context.Context, target ...any) {
+	err := d.GetBatchWithError(ctx, target...)
 	if err != nil {
 		panic(err)
 	}
 }
 
-// GetWithError will try to get the requested dependencies from the  DependencyContext. If it
+// GetBatchWithError will try to get the requested dependencies from the DependencyContext. If it
 // fails to do so it will return an error. This can still panic due to static issues such as
 // if the target is not a pointer to something to be filled.
-func (d *DependencyContext) GetWithError(ctx context.Context, targets ...interface{}) error {
+func (d *DependencyContext) GetBatchWithError(ctx context.Context, targets ...any) error {
 	for _, target := range targets {
 		err := d.getDependency(ctx, target)
 		if err != nil {
@@ -128,12 +128,12 @@ func (d *DependencyContext) GetWithError(ctx context.Context, targets ...interfa
 	return nil
 }
 
-func (d *DependencyContext) getDependency(ctx context.Context, target interface{}) error {
+func (d *DependencyContext) getDependency(ctx context.Context, target any) error {
 	s, err := d.findApplicableSlot(target)
 	if err != nil {
 		pdc := d.parentDependencyContext()
 		if pdc != nil {
-			return pdc.GetWithError(ctx, target)
+			return pdc.GetBatchWithError(ctx, target)
 		}
 		return err
 	}
@@ -149,7 +149,7 @@ func (d *DependencyContext) getDependency(ctx context.Context, target interface{
 // the slot is directly found by the request type, simply return it. Otherwise, look for another
 // slot that can be assigned to the target and return that if fount. Returns nil if
 // nothing is suitable.
-func (d *DependencyContext) findApplicableSlot(target interface{}) (*slot, error) {
+func (d *DependencyContext) findApplicableSlot(target any) (*slot, error) {
 	pt := reflect.TypeOf(target)
 	if pt.Kind() != reflect.Pointer {
 		panic(fmt.Sprintf("target must be a pointer type: %v", pt))
@@ -178,7 +178,7 @@ func (d *DependencyContext) findApplicableSlot(target interface{}) (*slot, error
 // either use the generator to make a value or delegate to an upstream DependencyContext.
 // The precondition for the function is that the slot's type matches the target such that the
 // slot can be assigned to target.
-func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, target interface{}) error {
+func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, target any) error {
 	// Before locking this slot, ensure that we're not in a cyclic dependency. If we are,
 	// return an error. Otherwise, the lock call would deadlock.
 	cycleCtx, unlocker, err := enterSlotProcessing(ctx, activeSlot)

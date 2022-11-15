@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestImmediateDependency(t *testing.T) {
+func Test_ImmediateDependency(t *testing.T) {
 	callCount := 0
 	f := func() *testWidget {
 		callCount++
@@ -25,13 +25,13 @@ func TestImmediateDependency(t *testing.T) {
 	assert.Equal(t, 1, callCount)
 
 	var widget *testWidget
-	Get(ctx, &widget)
+	GetBatch(ctx, &widget)
 
 	assert.Equal(t, 42, widget.val)
 	assert.Equal(t, 1, callCount)
 }
 
-func TestImmediateDependency_LongCall(t *testing.T) {
+func Test_ImmediateDependency_LongCall(t *testing.T) {
 	callCount := 0
 	f := func() *testWidget {
 		callCount++
@@ -50,7 +50,7 @@ func TestImmediateDependency_LongCall(t *testing.T) {
 	start := time.Now()
 
 	var widget *testWidget
-	Get(ctx, &widget)
+	GetBatch(ctx, &widget)
 
 	d := time.Since(start)
 
@@ -59,7 +59,7 @@ func TestImmediateDependency_LongCall(t *testing.T) {
 	assert.InEpsilon(t, 50*time.Millisecond, d, .1)
 }
 
-func TestImmediateDependency_Error(t *testing.T) {
+func Test_ImmediateDependency_Error(t *testing.T) {
 	callCount := 0
 	f := func() (*testWidget, error) {
 		callCount++
@@ -77,7 +77,7 @@ func TestImmediateDependency_Error(t *testing.T) {
 
 	var widget *testWidget
 	assert.Panics(t, func() {
-		Get(ctx, &widget)
+		GetBatch(ctx, &widget)
 	})
 
 	assert.Nil(t, widget)

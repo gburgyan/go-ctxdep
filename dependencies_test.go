@@ -31,12 +31,21 @@ func Test_SimpleObject(t *testing.T) {
 	ctx := NewDependencyContext(context.Background(), &testWidget{val: 42})
 
 	var widget *testWidget
-	Get(ctx, &widget)
+	GetBatch(ctx, &widget)
 	assert.Equal(t, 42, widget.val)
 
 	dc := GetDependencyContext(ctx)
 	widget = nil
-	dc.Get(ctx, &widget)
+	dc.GetBatch(ctx, &widget)
+	assert.Equal(t, 42, widget.val)
+
+	assert.Equal(t, "*ctxdep.testWidget - value: true - generator: -", Status(ctx))
+}
+
+func Test_SimpleObjectGeneric(t *testing.T) {
+	ctx := NewDependencyContext(context.Background(), &testWidget{val: 42})
+
+	widget := Get[*testWidget](ctx)
 	assert.Equal(t, 42, widget.val)
 
 	assert.Equal(t, "*ctxdep.testWidget - value: true - generator: -", Status(ctx))
@@ -47,12 +56,11 @@ func Test_GeneratorAndObject(t *testing.T) {
 		return &testWidget{val: 42}
 	}, &tempImpl{})
 
-	var widget *testWidget
-	Get(ctx, &widget)
+	widget := Get[*testWidget](ctx)
 	assert.Equal(t, 42, widget.val)
 
 	var iface tempInterface
-	Get(ctx, &iface)
+	GetBatch(ctx, &iface)
 	assert.Equal(t, 105, iface.getVal())
 }
 
@@ -65,12 +73,10 @@ func Test_AddGenerator_MultiOutput(t *testing.T) {
 
 	ctx := NewDependencyContext(context.Background(), creator)
 
-	var doodad *testDoodad
-	Get(ctx, &doodad)
+	doodad := Get[*testDoodad](ctx)
 	assert.Equal(t, "new doodad", doodad.val)
 
-	var widget *testWidget
-	Get(ctx, &widget)
+	widget := Get[*testWidget](ctx)
 	assert.Equal(t, 42, widget.val)
 
 	assert.Equal(t, 1, calls)
@@ -103,7 +109,7 @@ func Test_Generator_MultipleRequests(t *testing.T) {
 
 	var doodad *testDoodad
 	var widget *testWidget
-	Get(ctx, &doodad, &widget)
+	GetBatch(ctx, &doodad, &widget)
 	assert.Equal(t, "new doodad", doodad.val)
 	assert.Equal(t, 42, widget.val)
 
@@ -122,12 +128,12 @@ func Test_GeneratorWithError_Error(t *testing.T) {
 	var doodad *testDoodad
 	var widget *testWidget
 	assert.Panics(t, func() {
-		Get(ctx, &doodad, &widget)
+		GetBatch(ctx, &doodad, &widget)
 	})
 
 	dc := GetDependencyContext(ctx)
 	assert.Panics(t, func() {
-		dc.Get(ctx, &doodad, &widget)
+		dc.GetBatch(ctx, &doodad, &widget)
 	})
 }
 
@@ -142,7 +148,7 @@ func Test_GeneratorWithError_NoError(t *testing.T) {
 
 	var doodad *testDoodad
 	var widget *testWidget
-	Get(ctx, &doodad, &widget)
+	GetBatch(ctx, &doodad, &widget)
 	assert.Equal(t, 42, widget.val)
 	assert.Equal(t, "myval", doodad.val)
 }
@@ -152,8 +158,7 @@ func Test_RelatedInterfaceGenerator(t *testing.T) {
 		return &tempImpl{}
 	})
 
-	var iface tempInterface
-	Get(ctx, &iface)
+	iface := Get[tempInterface](ctx)
 
 	assert.Equal(t, 105, iface.getVal())
 }
@@ -174,8 +179,7 @@ func Test_MultiLevelDependencies(t *testing.T) {
 
 	ctx := NewDependencyContext(context.Background(), f1, f2)
 
-	var doodad *testDoodad
-	Get(ctx, &doodad)
+	doodad := Get[*testDoodad](ctx)
 
 	assert.Equal(t, "42", doodad.val)
 }
@@ -196,8 +200,7 @@ func Test_CyclicDependencies_FromParams(t *testing.T) {
 
 	ctx := NewDependencyContext(context.Background(), f1, f2)
 
-	var widget *testWidget
-	err := GetWithError(ctx, &widget)
+	_, err := GetWithError[*testWidget](ctx)
 
 	assert.Error(t, err)
 	assert.Equal(t, "cyclic dependency error getting slot: *ctxdep.testWidget", err.Error())
@@ -206,7 +209,7 @@ func Test_CyclicDependencies_FromParams(t *testing.T) {
 func Test_CyclicDependencies_Implicit(t *testing.T) {
 	f1 := func(ctx context.Context) (*testWidget, error) {
 		var doodad *testDoodad
-		err := GetWithError(ctx, &doodad)
+		err := GetBatchWithError(ctx, &doodad)
 		if err != nil {
 			return nil, err
 		}
@@ -218,7 +221,7 @@ func Test_CyclicDependencies_Implicit(t *testing.T) {
 
 	f2 := func(ctx context.Context) (*testDoodad, error) {
 		var widget *testWidget
-		err := GetWithError(ctx, &widget)
+		err := GetBatchWithError(ctx, &widget)
 		if err != nil {
 			return nil, err
 		}
@@ -229,8 +232,7 @@ func Test_CyclicDependencies_Implicit(t *testing.T) {
 
 	ctx := NewDependencyContext(context.Background(), f1, f2)
 
-	var widget *testWidget
-	err := GetWithError(ctx, &widget)
+	_, err := GetWithError[*testWidget](ctx)
 
 	assert.Error(t, err)
 	// Note how this is different from the previous error. The control has passed from the
@@ -245,8 +247,7 @@ func Test_MultiLevelDependencies_Param(t *testing.T) {
 
 	c2 := NewDependencyContext(c1, func(w *testWidget) *testDoodad { return &testDoodad{val: fmt.Sprintf("Doodad: %d", w.val)} })
 
-	var doodad *testDoodad
-	Get(c2, &doodad)
+	doodad := Get[*testDoodad](c2)
 
 	assert.Equal(t, "Doodad: 42", doodad.val)
 	assert.Equal(t, "*ctxdep.testDoodad - value: true - generator: (*ctxdep.testWidget) *ctxdep.testDoodad\n----\nparent dependency context:\n*ctxdep.testWidget - value: true - generator: () *ctxdep.testWidget", Status(c2))
@@ -257,8 +258,7 @@ func Test_MultiLevelDependencies_Param(t *testing.T) {
 func Test_NonPointerDependencies(t *testing.T) {
 	ctx := NewDependencyContext(context.Background(), func() testWidget { return testWidget{val: 42} })
 
-	var widget testWidget
-	Get(ctx, &widget)
+	widget := Get[testWidget](ctx)
 
 	assert.Equal(t, 42, widget.val)
 }
@@ -277,8 +277,7 @@ func Test_GeneratorReturnNil(t *testing.T) {
 	f := func() *testDoodad { return nil }
 	ctx := NewDependencyContext(context.Background(), f)
 
-	var doodad *testDoodad
-	err := GetWithError(ctx, &doodad)
+	_, err := GetWithError[*testDoodad](ctx)
 	assert.Error(t, err)
 	assert.Equal(t, "error mapping generator results to context: *ctxdep.testDoodad (generator returned nil result: *ctxdep.testDoodad)", err.Error())
 }
@@ -286,8 +285,7 @@ func Test_GeneratorReturnNil(t *testing.T) {
 func Test_UnknownDependencies(t *testing.T) {
 	ctx := NewDependencyContext(context.Background(), func() testWidget { return testWidget{val: 42} })
 
-	var doodad *testDoodad
-	err := GetWithError(ctx, &doodad)
+	_, err := GetWithError[*testDoodad](ctx)
 	assert.Error(t, err)
 	assert.Equal(t, "slot not found for requested type: *ctxdep.testDoodad", err.Error())
 }
@@ -296,7 +294,7 @@ func Test_NoDependencyContext(t *testing.T) {
 	ctx := context.Background()
 	var widget *testWidget
 	assert.Panics(t, func() {
-		Get(ctx, &widget)
+		GetBatch(ctx, &widget)
 	})
 }
 
@@ -312,6 +310,6 @@ func Test_NonPointerGet(t *testing.T) {
 
 	var doodad testDoodad
 	assert.Panics(t, func() {
-		Get(ctx, doodad)
+		GetBatch(ctx, doodad)
 	})
 }
