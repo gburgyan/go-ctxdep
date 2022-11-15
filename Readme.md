@@ -12,9 +12,22 @@ go get github.com/gburgyan/go-ctxdep
 
 Go already has a nice way to keep track of things in your context: `context.Context`. This adds some helpers to that to simplify getting things out of that context that is already being passed around.
 
-The fundamental as
+Design goals:
 
-The basic feature of the go-ctxdep library is to provide a simple way to access needed dependencies away from the creation of those dependencies. It provides ways of putting dependencies, which are simply instances of objects that can be pulled out later, into the context that is already there. For objects that may be more costly to generate dependencies can be represented by generators that are called when they are first referenced. In cases where you know an expensive dependency is needed, you can mark the generator to run immediately which will fire off the generator in a background goroutine to be able to give it as much of a head start as possible.
+* Don't pass around new objects; the Golang context is just fine
+* Be fast to get dependencies from the context
+* Be explicit with what is added to the context--avoid magic
+* Provide a flexible interface for adding things to the context
+  * Make it easy to fetch things in the background to make more performant code
+* Make it as easy to test client code as possible
+* Reduce boilerplate and unnecessary code
+* Use no configuration that can confuse users
+* Safe to use
+  * Completely thread-safety with no chances of deadlocks
+  * No possibility of infinite loops when resolving more complex dependencies
+* Provide comprehensive debugging in case something _does_ get confusing
+
+The basic feature of the go-ctxdep library is to provide a simple way to access needed dependencies away from the creation of those dependencies. It provides ways of putting dependencies, which are simply instances of objects that can be pulled out later, into the context that is already there, then accessing them simply afterward. For objects that may be more costly to produce, dependencies can be represented by generators that are called when they are first referenced. In cases where it is known that an expensive dependency is needed, you can mark the generator to run immediately which will fire off the generator in a background goroutine to be able to give it as much of a head start as possible.
 
 All this is done so the calling code is as simple and intuitive as possible and relying on as little magic as practical. There is no configuration to go wrong and everything is in code to clearly show the intent of the users of this class.
 
@@ -250,3 +263,9 @@ All efforts have been made to ensure that any accesses to the dependency context
 The intent is that a generator may involve potentially expensive operations, so it would be wasteful to invoke it multiple times.
 
 This same mechanism is also used when resolving immediate dependencies to prevent running the same generator more than once.
+
+### Debugging and error handling
+
+A call to `ctxdep.Status(ctx)` will return a string representation of everything in the dependency context. This can be used to verify what is and is not in the context in case something unexpected occurs.
+
+In case errors are returned, they will be of type `ctxdep.DependencyError`. The status of the context will be in that error object at time of evaluation to aid in any debugging that is needed.
