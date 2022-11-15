@@ -179,14 +179,6 @@ func (d *DependencyContext) findApplicableSlot(target any) (*slot, error) {
 // The precondition for the function is that the slot's type matches the target such that the
 // slot can be assigned to target.
 func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, target any) error {
-	// Before locking this slot, ensure that we're not in a cyclic dependency. If we are,
-	// return an error. Otherwise, the lock call would deadlock.
-	cycleCtx, unlocker, err := enterSlotProcessing(ctx, activeSlot)
-	if err != nil {
-		return err
-	}
-	defer unlocker()
-
 	targetVal := reflect.ValueOf(target)
 	targetType := reflect.TypeOf(target).Elem()
 
@@ -201,6 +193,14 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 		targetVal.Elem().Set(slotVal)
 		return nil
 	}
+
+	// Before locking this slot, ensure that we're not in a cyclic dependency. If we are,
+	// return an error. Otherwise, the lock call would deadlock.
+	cycleCtx, unlocker, err := enterSlotProcessing(ctx, activeSlot)
+	if err != nil {
+		return err
+	}
+	defer unlocker()
 
 	// Preemptively lock all the potential outputs from a generator for this slot, if it exists. We
 	// need to ensure that the locks are acquired in the same order in all cases to prevent potential
