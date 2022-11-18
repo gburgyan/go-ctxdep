@@ -250,7 +250,7 @@ func Test_MultiLevelDependencies_Param(t *testing.T) {
 	doodad := Get[*testDoodad](c2)
 
 	assert.Equal(t, "Doodad: 42", doodad.val)
-	assert.Equal(t, "*ctxdep.testDoodad - value: true - generator: (*ctxdep.testWidget) *ctxdep.testDoodad\n----\nparent dependency context:\n*ctxdep.testWidget - value: true - generator: () *ctxdep.testWidget", Status(c2))
+	assert.Equal(t, "*ctxdep.testDoodad - value: true - generator: (*ctxdep.testWidget) *ctxdep.testDoodad\n*ctxdep.testWidget - value: true - generator: -\n----\nparent dependency context:\n*ctxdep.testWidget - value: true - generator: () *ctxdep.testWidget", Status(c2))
 }
 
 // While the intent is to store pointers to objects and not objects themselves to prevent copying,
