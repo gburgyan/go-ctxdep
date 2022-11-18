@@ -322,3 +322,20 @@ func Test_NonPointerGet(t *testing.T) {
 		GetBatch(ctx, doodad)
 	})
 }
+
+// Verify that we can insert nominally the same type of object, int in this case, that have
+// been given unique types themselves.
+func Test_TypedObjects(t *testing.T) {
+	type intA int
+	type intB int
+
+	a := intA(42)
+	b := intB(105)
+	ctx := NewDependencyContext(context.Background(), &a, &b)
+
+	resultA := Get[*intA](ctx)
+	resultB := Get[*intB](ctx)
+
+	assert.Equal(t, intA(42), *resultA)
+	assert.Equal(t, intB(105), *resultB)
+}
