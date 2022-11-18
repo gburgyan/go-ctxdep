@@ -68,12 +68,21 @@ var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 
 // AddDependencies adds the given dependencies to the context. This will add all the deps
 // passed in and treat them as a generator if it's a function or a direct dependency
-// if it's not.
+// if it's not. Validation is done to ensure that any generators that have been added
+// to the context have parameters that can be resolved by the context. If there are
+// unresolved dependencies, this will panic.
+//
+// After adding the dependencies to the context, any immediate dependencies will be resolved.
 func (d *DependencyContext) AddDependencies(ctx context.Context, deps ...any) {
 	d.addDependencies(deps, false)
 	d.resolveImmediateDependencies(ctx)
 }
 
+// addDependencies adds the given dependencies to the context. This will add all the deps
+// passed in and treat them as a generator if it's a function or a direct dependency
+// if it's not. Validation is done to ensure that any generators that have been added
+// to the context have parameters that can be resolved by the context. If there are
+// unresolved dependencies, this will panic.
 func (d *DependencyContext) addDependencies(deps []any, immediate bool) {
 	for _, dep := range deps {
 		if immediateDependencies, ok := dep.(*immediateDependencies); ok {
@@ -86,6 +95,11 @@ func (d *DependencyContext) addDependencies(deps []any, immediate bool) {
 			} else if depKind == reflect.Pointer {
 				d.addValue(depType, dep)
 			}
+		}
+	}
+	for _, s := range d.slots {
+		if !d.validateGeneratorForSlot(s) {
+			panic(fmt.Sprintf("generator for %s has dependencies that cannot be resolved", formatGeneratorDebug(s.generator)))
 		}
 	}
 }
@@ -128,6 +142,7 @@ func (d *DependencyContext) GetBatchWithError(ctx context.Context, targets ...an
 	return nil
 }
 
+// getDependency fills in the value of the target, or returns an error if it cannot.
 func (d *DependencyContext) getDependency(ctx context.Context, target any) error {
 	s, t, err := d.findApplicableSlot(target)
 	if err != nil {
@@ -143,6 +158,20 @@ func (d *DependencyContext) getDependency(ctx context.Context, target any) error
 		return err
 	}
 	return nil
+}
+
+// hasApplicableDependency returns if this, or a parent dependency context, as a slot that
+// can fulfil that dependency.
+func (d *DependencyContext) hasApplicableDependency(target any) bool {
+	s, _, _ := d.findApplicableSlot(target)
+	if s != nil {
+		return true
+	}
+	pdc := d.parentDependencyContext()
+	if pdc != nil {
+		return pdc.hasApplicableDependency(target)
+	}
+	return false
 }
 
 // findApplicableSlot looks for an appropriate slot that can fulfil the requested target. If

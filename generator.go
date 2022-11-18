@@ -155,3 +155,29 @@ func (d *DependencyContext) getGeneratorOutputSlots(activeSlot *slot) []*slot {
 	}
 	return result
 }
+
+func (d *DependencyContext) validateGeneratorForSlot(s *slot) bool {
+	if s.value != nil {
+		return true
+	}
+	genType := reflect.TypeOf(s.generator)
+	if genType.Kind() != reflect.Func {
+		// There should be no way of getting here.
+		return false
+	}
+	inCount := genType.NumIn()
+	for i := 0; i < inCount; i++ {
+		inType := genType.In(i)
+		if inType == contextType {
+			continue
+		} else {
+			paramPointerValue := reflect.New(inType)
+			targetTypePointer := paramPointerValue.Interface()
+			hasDependency := d.hasApplicableDependency(targetTypePointer)
+			if !hasDependency {
+				return false
+			}
+		}
+	}
+	return true
+}

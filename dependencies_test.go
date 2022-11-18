@@ -273,6 +273,15 @@ func Test_MultipleGenerators_Invalid(t *testing.T) {
 	})
 }
 
+func Test_MultipleGenerators_UnresolvedDependency(t *testing.T) {
+	f := func(_ *testDoodad) *testWidget { return nil }
+
+	// The function needs a testDoodad, but there is no such thing in the context.
+	assert.Panics(t, func() {
+		_ = NewDependencyContext(context.Background(), f)
+	})
+}
+
 func Test_GeneratorReturnNil(t *testing.T) {
 	f := func() *testDoodad { return nil }
 	ctx := NewDependencyContext(context.Background(), f)
