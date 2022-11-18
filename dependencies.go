@@ -148,7 +148,15 @@ func (d *DependencyContext) getDependency(ctx context.Context, target any) error
 	if err != nil {
 		pdc := d.parentDependencyContext()
 		if pdc != nil {
-			return pdc.GetBatchWithError(ctx, target)
+			err = pdc.GetBatchWithError(ctx, target)
+			if err == nil {
+				// Hoist the parent dependency to this level to save time on future calls.
+				d.slots[t] = &slot{
+					value:     target,
+					generator: nil,
+					slotType:  t,
+				}
+			}
 		}
 		return err
 	}
@@ -195,7 +203,7 @@ func (d *DependencyContext) findApplicableSlot(target any) (*slot, reflect.Type,
 		}
 	}
 
-	return nil, nil, &DependencyError{
+	return nil, requestType, &DependencyError{
 		Message:        "slot not found for requested type",
 		ReferencedType: requestType,
 		Status:         d.Status(),
