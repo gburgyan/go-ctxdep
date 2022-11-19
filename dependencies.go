@@ -67,18 +67,11 @@ type slot struct {
 type SlotStatus int
 
 const (
-	Status_Uninitialized SlotStatus = 0 // should never happen
-	Status_Direct                   = 1
-	Status_FromGenerator            = 2
-	Status_FromParent               = 3
+	StatusUninitialized SlotStatus = 0 // should never happen
+	StatusDirect                   = 1
+	StatusFromGenerator            = 2
+	StatusFromParent               = 3
 )
-
-var statusLookup = map[SlotStatus]string{
-	Status_Uninitialized: "Uninitialized",
-	Status_Direct:        "Direct Dependency",
-	Status_FromGenerator: "From Generator",
-	Status_FromParent:    "From Parent",
-}
 
 var errorType = reflect.TypeOf((*error)(nil)).Elem()
 var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
@@ -131,7 +124,7 @@ func (d *DependencyContext) addValue(depType reflect.Type, dep any) {
 	s := &slot{
 		value:    dep,
 		slotType: depType,
-		status:   Status_Direct,
+		status:   StatusDirect,
 	}
 	d.slots[depType] = s
 }
@@ -173,7 +166,7 @@ func (d *DependencyContext) getDependency(ctx context.Context, target any) error
 					value:     target,
 					generator: nil,
 					slotType:  t,
-					status:    Status_FromParent,
+					status:    StatusFromParent,
 				}
 			}
 		}
@@ -210,21 +203,26 @@ func (d *DependencyContext) findApplicableSlot(target any) (*slot, reflect.Type,
 	if pt.Kind() != reflect.Pointer {
 		panic(fmt.Sprintf("target must be a pointer type: %v", pt))
 	}
-	requestType := pt.Elem()
+	requestedType := pt.Elem()
 
-	if s, ok := d.slots[requestType]; ok {
-		return s, requestType, nil
+	if s, ok := d.slots[requestedType]; ok {
+		return s, requestedType, nil
 	}
 
 	for slotTarget, s := range d.slots {
-		if requestType.Kind() == reflect.Interface && slotTarget.AssignableTo(requestType) {
-			return s, requestType, nil
+		if requestedType.Kind() == reflect.Interface && slotTarget.AssignableTo(requestedType) {
+			// Create a new reference to this slot showing that this slot is assignable
+			// to the target. Essentially this caches the slow lookup of the `AssignableTo`
+			// check we just did. This is safe because the slot is still the same slot with
+			// the same mutex and all.
+			d.slots[requestedType] = s
+			return s, requestedType, nil
 		}
 	}
 
-	return nil, requestType, &DependencyError{
+	return nil, requestedType, &DependencyError{
 		Message:        "slot not found for requested type",
-		ReferencedType: requestType,
+		ReferencedType: requestedType,
 		Status:         d.Status(),
 	}
 }

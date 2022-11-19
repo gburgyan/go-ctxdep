@@ -18,9 +18,28 @@ func (d *DependencyContext) Status() string {
 	slotVals := map[string]string{}
 	var slotKeys []string
 
-	for _, s := range d.slots {
-		keyString := fmt.Sprintf("%v", s.slotType)
-		slotVals[keyString] = fmt.Sprintf("%v - value: %t - %s - generator: %s", s.slotType, s.value != nil, statusLookup[s.status], formatGeneratorDebug(s.generator))
+	for t, s := range d.slots {
+		keyString := fmt.Sprintf("%v", t)
+		if t == s.slotType {
+			var slotLine string
+			switch s.status {
+			case StatusUninitialized:
+				slotLine = fmt.Sprintf("%v - uninitialized - generator: %s", t, formatGeneratorDebug(s.generator))
+			case StatusDirect:
+				slotLine = fmt.Sprintf("%v - direct value set", t)
+			case StatusFromGenerator:
+				slotLine = fmt.Sprintf("%v - created from generator: %s", t, formatGeneratorDebug(s.generator))
+			case StatusFromParent:
+				slotLine = fmt.Sprintf("%v - imported from parent context", t)
+			}
+			// original slots have matching keys and slot types
+			slotVals[keyString] = slotLine
+		} else {
+			// non-matching keys and slot types are created when there is a fuzzier
+			// match between the actual slot type and the requested type. These are
+			// created lazily in findApplicableSlot.
+			slotVals[keyString] = fmt.Sprintf("%v - assigned from %v", t, s.slotType)
+		}
 		slotKeys = append(slotKeys, keyString)
 	}
 

@@ -41,10 +41,11 @@ func (d *DependencyContext) addGenerator(generatorFunction any, immediate bool) 
 			panic(fmt.Sprintf("generator result type %v already exists--a generator may not override an existing slot", resultType))
 		}
 		s := &slot{
+			value:     nil,
 			generator: generatorFunction,
 			slotType:  resultType,
 			immediate: immediate,
-			status:    Status_FromGenerator,
+			status:    StatusUninitialized,
 		}
 		d.slots[resultType] = s
 	}
@@ -109,28 +110,16 @@ func (d *DependencyContext) mapGeneratorResults(results []reflect.Value, targetT
 			targetVal.Elem().Set(result)
 		}
 
+		// Now save the result value to the slot for later use.
 		if resultSlot, ok := d.slots[resultType]; ok {
 			if resultSlot.value == nil {
 				resultSlot.value = result.Interface()
+				resultSlot.status = StatusFromGenerator
 			}
 		} else {
 			// We should never get this since the addGenerator call
 			// should have pre-created these.
-			d.slots[resultType] = &slot{value: result.Interface(), status: Status_FromGenerator}
-		}
-
-		if targetType != resultType {
-			// Now handle the case where we asked for something like an
-			// interface and found this slot. This fills in the lookup
-			// directly for the actual requested type so if it's
-			// requested again we can find it directly.
-			if targetSlot, ok := d.slots[targetType]; ok {
-				if targetSlot.value == nil {
-					targetSlot.value = result.Interface()
-				}
-			} else {
-				d.slots[resultType] = &slot{value: result.Interface(), status: Status_FromGenerator}
-			}
+			d.slots[resultType] = &slot{value: result.Interface(), status: StatusFromGenerator}
 		}
 	}
 	return nil

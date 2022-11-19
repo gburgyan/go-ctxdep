@@ -39,7 +39,7 @@ func Test_SimpleObject(t *testing.T) {
 	dc.GetBatch(ctx, &widget)
 	assert.Equal(t, 42, widget.val)
 
-	assert.Equal(t, "*ctxdep.testWidget - value: true - Direct Dependency - generator: -", Status(ctx))
+	assert.Equal(t, "*ctxdep.testWidget - direct value set", Status(ctx))
 }
 
 func Test_SimpleObjectGeneric(t *testing.T) {
@@ -48,7 +48,7 @@ func Test_SimpleObjectGeneric(t *testing.T) {
 	widget := Get[*testWidget](ctx)
 	assert.Equal(t, 42, widget.val)
 
-	assert.Equal(t, "*ctxdep.testWidget - value: true - Direct Dependency - generator: -", Status(ctx))
+	assert.Equal(t, "*ctxdep.testWidget - direct value set", Status(ctx))
 }
 
 func Test_GeneratorAndObject(t *testing.T) {
@@ -56,12 +56,16 @@ func Test_GeneratorAndObject(t *testing.T) {
 		return &testWidget{val: 42}
 	}, &tempImpl{})
 
+	assert.Equal(t, "*ctxdep.tempImpl - direct value set\n*ctxdep.testWidget - uninitialized - generator: () *ctxdep.testWidget", Status(ctx))
+
 	widget := Get[*testWidget](ctx)
 	assert.Equal(t, 42, widget.val)
 
 	var iface tempInterface
 	GetBatch(ctx, &iface)
 	assert.Equal(t, 105, iface.getVal())
+
+	assert.Equal(t, "*ctxdep.tempImpl - direct value set\n*ctxdep.testWidget - created from generator: () *ctxdep.testWidget\nctxdep.tempInterface - assigned from *ctxdep.tempImpl", Status(ctx))
 }
 
 func Test_AddGenerator_MultiOutput(t *testing.T) {
@@ -151,6 +155,8 @@ func Test_GeneratorWithError_NoError(t *testing.T) {
 	GetBatch(ctx, &doodad, &widget)
 	assert.Equal(t, 42, widget.val)
 	assert.Equal(t, "myval", doodad.val)
+
+	assert.Equal(t, "*ctxdep.testDoodad - created from generator: (context.Context) *ctxdep.testWidget, *ctxdep.testDoodad, error\n*ctxdep.testWidget - created from generator: (context.Context) *ctxdep.testWidget, *ctxdep.testDoodad, error", Status(ctx))
 }
 
 func Test_RelatedInterfaceGenerator(t *testing.T) {
@@ -182,6 +188,7 @@ func Test_MultiLevelDependencies(t *testing.T) {
 	doodad := Get[*testDoodad](ctx)
 
 	assert.Equal(t, "42", doodad.val)
+	assert.Equal(t, "*ctxdep.testDoodad - created from generator: (context.Context, *ctxdep.testWidget) *ctxdep.testDoodad\n*ctxdep.testWidget - created from generator: (context.Context) *ctxdep.testWidget", Status(ctx))
 }
 
 func Test_CyclicDependencies_FromParams(t *testing.T) {
@@ -250,7 +257,7 @@ func Test_MultiLevelDependencies_Param(t *testing.T) {
 	doodad := Get[*testDoodad](c2)
 
 	assert.Equal(t, "Doodad: 42", doodad.val)
-	assert.Equal(t, "*ctxdep.testDoodad - value: true - From Generator - generator: (*ctxdep.testWidget) *ctxdep.testDoodad\n*ctxdep.testWidget - value: true - From Parent - generator: -\n----\nparent dependency context:\n*ctxdep.testWidget - value: true - From Generator - generator: () *ctxdep.testWidget", Status(c2))
+	assert.Equal(t, "*ctxdep.testDoodad - created from generator: (*ctxdep.testWidget) *ctxdep.testDoodad\n*ctxdep.testWidget - imported from parent context\n----\nparent dependency context:\n*ctxdep.testWidget - created from generator: () *ctxdep.testWidget", Status(c2))
 }
 
 // While the intent is to store pointers to objects and not objects themselves to prevent copying,
@@ -261,6 +268,7 @@ func Test_NonPointerDependencies(t *testing.T) {
 	widget := Get[testWidget](ctx)
 
 	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, "ctxdep.testWidget - created from generator: () ctxdep.testWidget", Status(ctx))
 }
 
 func Test_MultipleGenerators_Invalid(t *testing.T) {
@@ -338,4 +346,6 @@ func Test_TypedObjects(t *testing.T) {
 
 	assert.Equal(t, intA(42), *resultA)
 	assert.Equal(t, intB(105), *resultB)
+
+	assert.Equal(t, "*ctxdep.intA - direct value set\n*ctxdep.intB - direct value set", Status(ctx))
 }
