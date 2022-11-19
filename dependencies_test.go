@@ -16,15 +16,16 @@ type testDoodad struct {
 	val string
 }
 
-type tempInterface interface {
+type testInterface interface {
 	getVal() int
 }
 
-type tempImpl struct {
+type testImpl struct {
+	val int
 }
 
-func (t tempImpl) getVal() int {
-	return 105
+func (t *testImpl) getVal() int {
+	return t.val
 }
 
 func Test_SimpleObject(t *testing.T) {
@@ -54,18 +55,18 @@ func Test_SimpleObjectGeneric(t *testing.T) {
 func Test_GeneratorAndObject(t *testing.T) {
 	ctx := NewDependencyContext(context.Background(), func() *testWidget {
 		return &testWidget{val: 42}
-	}, &tempImpl{})
+	}, &testImpl{val: 105})
 
-	assert.Equal(t, "*ctxdep.tempImpl - direct value set\n*ctxdep.testWidget - uninitialized - generator: () *ctxdep.testWidget", Status(ctx))
+	assert.Equal(t, "*ctxdep.testImpl - direct value set\n*ctxdep.testWidget - uninitialized - generator: () *ctxdep.testWidget", Status(ctx))
 
 	widget := Get[*testWidget](ctx)
 	assert.Equal(t, 42, widget.val)
 
-	var iface tempInterface
+	var iface testInterface
 	GetBatch(ctx, &iface)
 	assert.Equal(t, 105, iface.getVal())
 
-	assert.Equal(t, "*ctxdep.tempImpl - direct value set\n*ctxdep.testWidget - created from generator: () *ctxdep.testWidget\nctxdep.tempInterface - assigned from *ctxdep.tempImpl", Status(ctx))
+	assert.Equal(t, "*ctxdep.testImpl - direct value set\n*ctxdep.testWidget - created from generator: () *ctxdep.testWidget\nctxdep.testInterface - assigned from *ctxdep.testImpl", Status(ctx))
 }
 
 func Test_AddGenerator_MultiOutput(t *testing.T) {
@@ -160,11 +161,11 @@ func Test_GeneratorWithError_NoError(t *testing.T) {
 }
 
 func Test_RelatedInterfaceGenerator(t *testing.T) {
-	ctx := NewDependencyContext(context.Background(), func(ctx context.Context) *tempImpl {
-		return &tempImpl{}
+	ctx := NewDependencyContext(context.Background(), func(ctx context.Context) *testImpl {
+		return &testImpl{val: 105}
 	})
 
-	iface := Get[tempInterface](ctx)
+	iface := Get[testInterface](ctx)
 
 	assert.Equal(t, 105, iface.getVal())
 }
@@ -348,4 +349,31 @@ func Test_TypedObjects(t *testing.T) {
 	assert.Equal(t, intB(105), *resultB)
 
 	assert.Equal(t, "*ctxdep.intA - direct value set\n*ctxdep.intB - direct value set", Status(ctx))
+}
+
+func Test_ComplicatedStatus(t *testing.T) {
+	// Set up a parent context that returns a concrete implementation of an interface
+	c1 := NewDependencyContext(context.Background(), func() *testImpl {
+		return &testImpl{val: 42}
+	}, func() *testDoodad {
+		return &testDoodad{val: "wo0t"}
+	})
+
+	// Make another status from that one
+	c2 := NewDependencyContext(c1, func(in testInterface) *testWidget {
+		return &testWidget{val: in.getVal()}
+	}, &testDoodad{val: "something cool"})
+
+	widget := Get[*testWidget](c2)
+
+	assert.Equal(t, 42, widget.val)
+	expected := `*ctxdep.testDoodad - direct value set
+*ctxdep.testWidget - created from generator: (ctxdep.testInterface) *ctxdep.testWidget
+ctxdep.testInterface - imported from parent context
+----
+parent dependency context:
+*ctxdep.testDoodad - uninitialized - generator: () *ctxdep.testDoodad
+*ctxdep.testImpl - created from generator: () *ctxdep.testImpl
+ctxdep.testInterface - assigned from *ctxdep.testImpl`
+	assert.Equal(t, expected, Status(c2))
 }

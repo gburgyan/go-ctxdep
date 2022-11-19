@@ -14,11 +14,11 @@ func BenchmarkGetStruct(b *testing.B) {
 }
 
 func BenchmarkGetInterface(b *testing.B) {
-	ctx := NewDependencyContext(context.Background(), func(ctx context.Context) *tempImpl {
-		return &tempImpl{}
+	ctx := NewDependencyContext(context.Background(), func(ctx context.Context) *testImpl {
+		return &testImpl{}
 	})
 
 	for i := 0; i < b.N; i++ {
-		_ = Get[tempInterface](ctx)
+		_ = Get[testInterface](ctx)
 	}
 }
