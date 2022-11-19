@@ -49,8 +49,12 @@ func GetBatch(ctx context.Context, target ...any) {
 // Get returns the value of type T from the dependency context. It otherwise behaves exactly like
 // GetBatch, but it only has the capability of returning a single value.
 func Get[T any](ctx context.Context) T {
+	dc := GetDependencyContext(ctx)
 	var target T
-	GetBatch(ctx, &target)
+	err := dc.getDependency(ctx, &target)
+	if err != nil {
+		panic(err)
+	}
 	return target
 }
 
@@ -67,8 +71,9 @@ func GetBatchWithError(ctx context.Context, target ...any) error {
 // GetWithError returns the value of type T from the dependency context. It otherwise behaves exactly like
 // GetBatchWithError, but it only has the capability of returning a single value and an error object.
 func GetWithError[T any](ctx context.Context) (T, error) {
+	dc := GetDependencyContext(ctx)
 	var target T
-	err := GetBatchWithError(ctx, &target)
+	err := dc.getDependency(ctx, &target)
 	return target, err
 }
 
