@@ -51,7 +51,7 @@ func GetBatch(ctx context.Context, target ...any) {
 func Get[T any](ctx context.Context) T {
 	dc := GetDependencyContext(ctx)
 	var target T
-	err := dc.getDependency(ctx, &target)
+	err := dc.GetDependency(ctx, &target)
 	if err != nil {
 		panic(err)
 	}
@@ -73,7 +73,7 @@ func GetBatchWithError(ctx context.Context, target ...any) error {
 func GetWithError[T any](ctx context.Context) (T, error) {
 	dc := GetDependencyContext(ctx)
 	var target T
-	err := dc.getDependency(ctx, &target)
+	err := dc.GetDependency(ctx, &target)
 	return target, err
 }
 

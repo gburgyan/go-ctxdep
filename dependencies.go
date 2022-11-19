@@ -144,7 +144,7 @@ func (d *DependencyContext) GetBatch(ctx context.Context, target ...any) {
 // if the target is not a pointer to something to be filled.
 func (d *DependencyContext) GetBatchWithError(ctx context.Context, targets ...any) error {
 	for _, target := range targets {
-		err := d.getDependency(ctx, target)
+		err := d.GetDependency(ctx, target)
 		if err != nil {
 			return err
 		}
@@ -152,8 +152,8 @@ func (d *DependencyContext) GetBatchWithError(ctx context.Context, targets ...an
 	return nil
 }
 
-// getDependency fills in the value of the target, or returns an error if it cannot.
-func (d *DependencyContext) getDependency(ctx context.Context, target any) error {
+// GetDependency fills in the value of the target, or returns an error if it cannot.
+func (d *DependencyContext) GetDependency(ctx context.Context, target any) error {
 	s, t, err := d.findApplicableSlot(target)
 	if err != nil {
 		pdc := d.parentDependencyContext()
