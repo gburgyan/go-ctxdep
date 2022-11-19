@@ -67,10 +67,9 @@ type slot struct {
 type SlotStatus int
 
 const (
-	StatusUninitialized SlotStatus = 0 // should never happen
-	StatusDirect                   = 1
-	StatusFromGenerator            = 2
-	StatusFromParent               = 3
+	StatusDirect     SlotStatus = iota // directly set dependency
+	StatusGenerator                    // a generator ran to create this dependency
+	StatusFromParent                   // imported from a parent dependency context (optimization)
 )
 
 var errorType = reflect.TypeOf((*error)(nil)).Elem()

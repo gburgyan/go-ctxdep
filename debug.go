@@ -23,12 +23,14 @@ func (d *DependencyContext) Status() string {
 		if t == s.slotType {
 			var slotLine string
 			switch s.status {
-			case StatusUninitialized:
-				slotLine = fmt.Sprintf("%v - uninitialized - generator: %s", t, formatGeneratorDebug(s.generator))
 			case StatusDirect:
 				slotLine = fmt.Sprintf("%v - direct value set", t)
-			case StatusFromGenerator:
-				slotLine = fmt.Sprintf("%v - created from generator: %s", t, formatGeneratorDebug(s.generator))
+			case StatusGenerator:
+				if s.value == nil {
+					slotLine = fmt.Sprintf("%v - uninitialized - generator: %s", t, formatGeneratorDebug(s.generator))
+				} else {
+					slotLine = fmt.Sprintf("%v - created from generator: %s", t, formatGeneratorDebug(s.generator))
+				}
 			case StatusFromParent:
 				slotLine = fmt.Sprintf("%v - imported from parent context", t)
 			}

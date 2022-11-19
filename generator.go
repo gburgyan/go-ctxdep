@@ -45,7 +45,7 @@ func (d *DependencyContext) addGenerator(generatorFunction any, immediate bool) 
 			generator: generatorFunction,
 			slotType:  resultType,
 			immediate: immediate,
-			status:    StatusUninitialized,
+			status:    StatusGenerator,
 		}
 		d.slots[resultType] = s
 	}
@@ -114,12 +114,12 @@ func (d *DependencyContext) mapGeneratorResults(results []reflect.Value, targetT
 		if resultSlot, ok := d.slots[resultType]; ok {
 			if resultSlot.value == nil {
 				resultSlot.value = result.Interface()
-				resultSlot.status = StatusFromGenerator
+				resultSlot.status = StatusGenerator
 			}
 		} else {
 			// We should never get this since the addGenerator call
 			// should have pre-created these.
-			d.slots[resultType] = &slot{value: result.Interface(), status: StatusFromGenerator}
+			d.slots[resultType] = &slot{value: result.Interface(), status: StatusGenerator}
 		}
 	}
 	return nil
