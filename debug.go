@@ -20,7 +20,7 @@ func (d *DependencyContext) Status() string {
 
 	for _, s := range d.slots {
 		keyString := fmt.Sprintf("%v", s.slotType)
-		slotVals[keyString] = fmt.Sprintf("%v - value: %t - generator: %s", s.slotType, s.value != nil, formatGeneratorDebug(s.generator))
+		slotVals[keyString] = fmt.Sprintf("%v - value: %t - %s - generator: %s", s.slotType, s.value != nil, statusLookup[s.status], formatGeneratorDebug(s.generator))
 		slotKeys = append(slotKeys, keyString)
 	}
 

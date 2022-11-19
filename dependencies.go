@@ -61,6 +61,23 @@ type slot struct {
 	slotType  reflect.Type
 	lock      sync.Mutex
 	immediate bool
+	status    SlotStatus
+}
+
+type SlotStatus int
+
+const (
+	Status_Uninitialized SlotStatus = 0 // should never happen
+	Status_Direct                   = 1
+	Status_FromGenerator            = 2
+	Status_FromParent               = 3
+)
+
+var statusLookup = map[SlotStatus]string{
+	Status_Uninitialized: "Uninitialized",
+	Status_Direct:        "Direct Dependency",
+	Status_FromGenerator: "From Generator",
+	Status_FromParent:    "From Parent",
 }
 
 var errorType = reflect.TypeOf((*error)(nil)).Elem()
@@ -114,6 +131,7 @@ func (d *DependencyContext) addValue(depType reflect.Type, dep any) {
 	s := &slot{
 		value:    dep,
 		slotType: depType,
+		status:   Status_Direct,
 	}
 	d.slots[depType] = s
 }
@@ -155,6 +173,7 @@ func (d *DependencyContext) getDependency(ctx context.Context, target any) error
 					value:     target,
 					generator: nil,
 					slotType:  t,
+					status:    Status_FromParent,
 				}
 			}
 		}

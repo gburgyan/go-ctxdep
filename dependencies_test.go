@@ -39,7 +39,7 @@ func Test_SimpleObject(t *testing.T) {
 	dc.GetBatch(ctx, &widget)
 	assert.Equal(t, 42, widget.val)
 
-	assert.Equal(t, "*ctxdep.testWidget - value: true - generator: -", Status(ctx))
+	assert.Equal(t, "*ctxdep.testWidget - value: true - Direct Dependency - generator: -", Status(ctx))
 }
 
 func Test_SimpleObjectGeneric(t *testing.T) {
@@ -48,7 +48,7 @@ func Test_SimpleObjectGeneric(t *testing.T) {
 	widget := Get[*testWidget](ctx)
 	assert.Equal(t, 42, widget.val)
 
-	assert.Equal(t, "*ctxdep.testWidget - value: true - generator: -", Status(ctx))
+	assert.Equal(t, "*ctxdep.testWidget - value: true - Direct Dependency - generator: -", Status(ctx))
 }
 
 func Test_GeneratorAndObject(t *testing.T) {
@@ -250,7 +250,7 @@ func Test_MultiLevelDependencies_Param(t *testing.T) {
 	doodad := Get[*testDoodad](c2)
 
 	assert.Equal(t, "Doodad: 42", doodad.val)
-	assert.Equal(t, "*ctxdep.testDoodad - value: true - generator: (*ctxdep.testWidget) *ctxdep.testDoodad\n*ctxdep.testWidget - value: true - generator: -\n----\nparent dependency context:\n*ctxdep.testWidget - value: true - generator: () *ctxdep.testWidget", Status(c2))
+	assert.Equal(t, "*ctxdep.testDoodad - value: true - From Generator - generator: (*ctxdep.testWidget) *ctxdep.testDoodad\n*ctxdep.testWidget - value: true - From Parent - generator: -\n----\nparent dependency context:\n*ctxdep.testWidget - value: true - From Generator - generator: () *ctxdep.testWidget", Status(c2))
 }
 
 // While the intent is to store pointers to objects and not objects themselves to prevent copying,
