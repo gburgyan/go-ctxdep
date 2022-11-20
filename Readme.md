@@ -1,4 +1,4 @@
-![Build status](https://github.com/gburgyan/go-ctxdep/actions/workflows/go.yml/badge.svg) [![PkgGoDev](https://pkg.go.dev/badge/github.com/gburgyan/go-ctxdep)](https://pkg.go.dev/github.com/gburgyan/go-ctxdep)
+![Build status](https://github.com/gburgyan/go-ctxdep/actions/workflows/go.yml/badge.svg) [![Go Report Card](https://goreportcard.com/badge/github.com/gburgyan/go-ctxdep)](https://goreportcard.com/report/github.com/gburgyan/go-ctxdep) [![PkgGoDev](https://pkg.go.dev/badge/github.com/gburgyan/go-ctxdep)](https://pkg.go.dev/github.com/gburgyan/go-ctxdep)
 
 # About
 
@@ -297,17 +297,59 @@ The intent is that a generator may involve potentially expensive operations, so 
 
 This same mechanism is also used when resolving immediate dependencies to block the requester while the generator runs.
 
-## Debugging and error handling
+## Debugging using `Status`
 
 A call to `ctxdep.Status(ctx)` will return a string representation of everything in the dependency context. This can be used to verify what is and is not in the context in case something unexpected occurs.
 
-In case errors are returned, they will be of type `ctxdep.DependencyError`. The status of the context will be in that error object at time of evaluation to aid in any debugging that is needed.
+A great example of what `Status` returns is in the `Test_ComplicatedStatus` test:
+
+```Go
+// Set up a parent context that returns a concrete implementation of an interface
+c1 := NewDependencyContext(context.Background(), func() *testImpl {
+        return &testImpl{val: 42}
+    }, func() *testDoodad {
+        return &testDoodad{val: "wo0t"}
+    })
+
+// Make another status from that one
+c2 := NewDependencyContext(c1, func(in testInterface) *testWidget {
+return &testWidget{val: in.getVal()}
+}, &testDoodad{val: "something cool"})
+
+widget := Get[*testWidget](c2)
+```
+
+A call to `Status(c2)` after execution returns:
+
+```
+*ctxdep.testDoodad - direct value set
+*ctxdep.testWidget - created from generator: (ctxdep.testInterface) *ctxdep.testWidget
+ctxdep.testInterface - imported from parent context
+----
+parent dependency context:
+*ctxdep.testDoodad - uninitialized - generator: () *ctxdep.testDoodad
+*ctxdep.testImpl - created from generator: () *ctxdep.testImpl
+ctxdep.testInterface - assigned from *ctxdep.testImpl
+```
+
+We can dissect this line by line:
+
+* `*ctxdep.testDoodad - direct value set` is the simplest case. This is a simple dependency that has been set.
+* `*ctxdep.testWidget - created from generator: (ctxdep.testInterface) *ctxdep.testWidget` notes that the `*testWidget` was created by calling a generator that takes a `testInterface`  that return the widget.
+* `ctxdep.testInterface - imported from parent context` says that the previous call's input dependency was fulfilled from the parent context's value. These imports are an optimization.
+* `parent dependency context` shows a navigation to this context's parent.
+* `*ctxdep.testDoodad - uninitialized - generator: () *ctxdep.testDoodad` is a generator that hasn't yet been run.
+* `*ctxdep.testImpl - created from generator: () *ctxdep.testImpl` shows that the `*testImpl` was created by calling a generator.
+* `ctxdep.testInterface - assigned from *ctxdep.testImpl` states that the `testInterface` was made by casting the `*testImpl` to the interface because it implements all of the functions of the interface.
+
 
 ## Handling errors
 
 The above examples use the `Get()` method to retrieve things from the context. The expectation in general is that anything that is requested **will** in the context. If it's not, the behavior of `Get()` is to `panic`. This simplifies the usage because you don't have to do error checks everywhere.
 
 If you *do* want to handle errors, you can call the `GetWithError()` function that works in exactly the same way as the regular `Get()`, but will also return errors if the type requested is not found. If a generator with an error is invoked, the error from the generator will be returned.
+
+In case errors are returned, they will be of type `ctxdep.DependencyError`. The status of the context will be in that error object at time of evaluation to aid in any debugging that is needed.
 
 Note, however, that this will still `panic` if the dependency context is not found. This is intentional as it grossly violates the preconditions for the call. A `panic` from a generator will still leak out as well.
 
@@ -342,3 +384,7 @@ It is valid to have multiple dependency contexts on the context stack. An easy e
 When looking for a dependency, either directly or to fulfil the requirements for a generator, the current dependency context is checked. If it's not found, any dependency contexts that also exist on the context are also checked. This also applies to checking for the existence of dependencies when adding generators.
 
 A key point to note is that you cannot have a lower level (e.g. service level dependency context) depend on a higher level (e.g. request) dependency. Since the higher-level dependency can change with requests, it would make the dependency caching at the lower level invalid. This is enforced by checking for dependencies when adding generators. This structurally prevents having defective dependency contexts set up.
+
+## Multiple types assignable to the same target
+
+This is an edge case that is _not_ handled. If a type is requested but is not present in the dependency context, and there are multiple types in the context that are assignable to the requested type, one of the types in the context will be used. Which one is not defined.
