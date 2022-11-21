@@ -9,16 +9,17 @@ Go already has a nice way to keep track of things in your context: `context.Cont
 * Offer a simple and easy to understand interface to the context dependencies
 * Don't pass around new objects; the Golang context is just fine
   * Don't have things like added scopes or anything else like that
+* Prioritize safety
+  * Type safe access to objects in the context
+  * Completely thread-safety with no chances of deadlocks even in extreme cases
+  * No possibility of infinite loops when resolving more complex dependencies
+  * Fail early and obviously--don't wait until some odd use case gets triggered in production
 * Be fast at getting dependencies from the context
 * Be explicit with what is added to the context--avoid magic and configuration
 * Provide a flexible interface for adding things to the context
   * Make it easy to fetch things in the background to make more performant code
 * Make it as easy to test code as possible
 * Reduce boilerplate and unnecessary code
-* Safe to use
-  * Completely thread-safety with no chances of deadlocks even in extreme cases
-  * No possibility of infinite loops when resolving more complex dependencies
-* Fail early and obviously--don't wait until some odd use case gets triggered in production
 * Provide comprehensive debugging in case something _does_ get confusing
 
 # Installation
@@ -43,17 +44,17 @@ The simplest case is to put an object into the dependency context, then later on
 
 ```Go
 type MyData struct {
-value string
+    value string
 }
 
 func Processor(ctx context.Context) {
-ctx = ctxdep.NewDependencyContext(ctx, &MyData{data:"for later"})
-client(ctx)
+    ctx = ctxdep.NewDependencyContext(ctx, &MyData{data:"for later"})
+    client(ctx)
 }
 
 func client(ctx context.Context) {
-data := ctxdep.Get[*MyData](ctx)
-fmt.Printf("Here's the data: %s", data.value)
+    data := ctxdep.Get[*MyData](ctx)
+    fmt.Printf("Here's the data: %s", data.value)
 }
 ```
 
@@ -67,24 +68,24 @@ The same process works with interfaces as well:
 
 ```Go
 type Service interface {
-Call(i int) int
+   Call(i int) int
 }
 
 type ServiceCaller struct {
 }
 
 func (s *ServiceCaller) Call(i int) int {
-// Do stuff here...
+    // Do stuff here...
 }
 
 func Processor(ctx context.Context) {
-ctx = ctxdep.NewDependencyContext(ctx, &ServiceCaller{})
-client(ctx)
+    ctx = ctxdep.NewDependencyContext(ctx, &ServiceCaller{})
+    client(ctx)
 }
 
 func client(ctx context.Context) {
-service := ctxdep.Get[Service](ctx)
-service.Call(42)
+    service := ctxdep.Get[Service](ctx)
+    service.Call(42)
 }
 ```
 
@@ -102,39 +103,39 @@ For example:
 
 ```Go
 type UserDataService interface {
-Lookup(request Request) *UserData
+    Lookup(request Request) *UserData
 }
 
 type UserData struct {
-Id      int
-Name    string
-IsAdmin bool
+    Id      int
+    Name    string
+    IsAdmin bool
 }
 
 type UserDataServiceCaller {
-// Implements UserDataService
+    // Implements UserDataService
 }
 
 func UserDataGenerator(request *Request) func(context.Context) (*UserData, error) {
-return func(ctx context.Context, userService *UserDataService) (*UserData, error) {
-userService := ctxdep.Get[*UserDataService](ctx)
-return userService.Lookup(request)
-}
+    return func(ctx context.Context, userService *UserDataService) (*UserData, error) {
+        userService := ctxdep.Get[*UserDataService](ctx)
+        return userService.Lookup(request)
+    }
 }
 
 func HandleRequest(ctx context.Context, request *Request) Response {
-ctx = ctxdep.NewDependencyContext(ctx, &UserDataServiceCaller{}, UserDataGenerator(request))
-isPermitted(ctx)
-...
+    ctx = ctxdep.NewDependencyContext(ctx, &UserDataServiceCaller{}, UserDataGenerator(request))
+    isPermitted(ctx)
+    ...
 }
 
 func isPermitted(ctx context.Context) bool {
-user := ctxdep.Get[*UserData](ctx)
-if user.IsAdmin {
-return true
-}
-// other stuff...
-return false
+    user := ctxdep.Get[*UserData](ctx)
+    if user.IsAdmin {
+        return true	
+    }
+    // other stuff...
+    return false
 }
 ```
 
@@ -148,16 +149,16 @@ However, the above example could be simpler. The function that returns a functio
 
 ```Go
 func UserDataGenerator(ctx context.Context) (*UserData, error) {
-userService := ctxdep.Get[*UserDataService](ctx)
-request := ctxdep.Get[*Request](ctx)
-return userService.Lookup(request)
+    userService := ctxdep.Get[*UserDataService](ctx)
+    request := ctxdep.Get[*Request](ctx)
+    return userService.Lookup(request)
 
 }
 
 func HandleRequest(ctx context.Context, request *Request) *Response {
-ctx = ctxdep.NewDependencyContext(ctx, &UserDataServiceCaller{}, request, UserDataGenerator)
-isPermitted(ctx)
-...
+    ctx = ctxdep.NewDependencyContext(ctx, &UserDataServiceCaller{}, request, UserDataGenerator)
+    isPermitted(ctx)
+    ...
 }
 ```
 
@@ -165,15 +166,15 @@ While this works, it can be even simpler:
 
 ```Go
 func UserDataGenerator(ctx context.Context, userService *UserDataService, request *Request) (*UserData, error) {
-return userService.Lookup(request)
+    return userService.Lookup(request)
 
 }
 
 // unchanged from before
 func HandleRequest(ctx context.Context, request *Request) *Response {
-ctx = ctxdep.NewDependencyContext(ctx, &UserDataServiceCaller{}, request, UserDataGenerator)
-isPermitted(ctx)
-...
+    ctx = ctxdep.NewDependencyContext(ctx, &UserDataServiceCaller{}, request, UserDataGenerator)
+    isPermitted(ctx)
+    ...
 }
 ```
 
@@ -213,12 +214,12 @@ func GetUserData(userId string) *UserData {...}
 module security
 
 func isPermitted(request *Request) bool {
-userData := user.GetUserData(request.userId)
-if userData.isAdmin {
-return true
-}
-// other stuff...
-return false
+    userData := user.GetUserData(request.userId)
+    if userData.isAdmin {
+        return true
+    }
+    // other stuff...
+    return false
 }
 ```
 
@@ -230,7 +231,7 @@ A different approach would be to abstract the `*UserDataService` into an interfa
 module user
 
 type UserFetcher interface {
-GetUserData(userId string) *UserData
+    GetUserData(userId string) *UserData
 }
 
 type DefaultUserFetcher struct {}
@@ -241,12 +242,12 @@ var Fetcher UserFetcher = &DefaultUserFetcher{}
 module security
 
 func isPermitted(request *Request) bool {
-userData := user.Fetcher.GetUserData(request.userId)
-if userData.isAdmin {
-return true
-}
-// other stuff...
-return false
+    userData := user.Fetcher.GetUserData(request.userId)
+    if userData.isAdmin {
+        return true
+    }
+    // other stuff...
+    return false
 }
 ```
 
@@ -258,23 +259,23 @@ With context dependencies, the unit test for this is easy:
 
 ```Go
 func isPermitted(ctx context.Context) bool {
-user := ctxdep.Get[*UserData](ctx)
-if user.IsAdmin {
-return true
-}
-// other stuff...
-return false
+    user := ctxdep.Get[*UserData](ctx)
+    if user.IsAdmin {
+        return true	
+    }
+    // other stuff...
+    return false
 }
 
 func Test_isPermitted(t *testing.T) {
-user := &UserData{
-Id:      42,
-Name:    "George Burgyan",
-IsAdmin: true,
-}
-ctx := ctxdep.NewDependencyContext(contest.Background(), user)
-permitted := isPermitted(ctx)
-assert.True(t, permitted)
+    user := &UserData{
+        Id:      42, 
+        Name:    "George Burgyan",
+        IsAdmin: true,
+    }
+    ctx := ctxdep.NewDependencyContext(contest.Background(), user)
+    permitted := isPermitted(ctx)
+    assert.True(t, permitted)    
 }
 ```
 
@@ -307,10 +308,10 @@ A great example of what `Status` returns is in the `Test_ComplicatedStatus` test
 ```Go
 // Set up a parent context that returns a concrete implementation of an interface
 c1 := NewDependencyContext(context.Background(), func() *testImpl {
-return &testImpl{val: 42}
-}, func() *testDoodad {
-return &testDoodad{val: "wo0t"}
-})
+        return &testImpl{val: 42}
+    }, func() *testDoodad {
+        return &testDoodad{val: "wo0t"}
+    })
 
 // Make another status from that one
 c2 := NewDependencyContext(c1, func(in testInterface) *testWidget {
@@ -360,9 +361,9 @@ If you need multiple values from the dependency context, there is a `GetBatch()`
 
 ```Go
 func f(ctx context.Context) {
-var widget *Widget
-var doodad *Doodad
-ctxdep.GetBatch(&widget, &doodad)
+    var widget *Widget
+    var doodad *Doodad
+    ctxdep.GetBatch(&widget, &doodad)
 }
 ```
 
