@@ -15,7 +15,7 @@ func NewDependencyContext(ctx context.Context, dependencies ...any) context.Cont
 		slots:         map[reflect.Type]*slot{},
 	}
 	newContext := context.WithValue(ctx, dependencyContextKey, dc)
-	dc.AddDependencies(newContext, dependencies...)
+	dc.addDependenciesAndInitialize(newContext, dependencies...)
 	return newContext
 }
 
@@ -51,7 +51,7 @@ func GetBatch(ctx context.Context, target ...any) {
 func Get[T any](ctx context.Context) T {
 	dc := GetDependencyContext(ctx)
 	var target T
-	err := dc.GetDependency(ctx, &target)
+	err := dc.FillDependency(ctx, &target)
 	if err != nil {
 		panic(err)
 	}
@@ -73,7 +73,7 @@ func GetBatchWithError(ctx context.Context, target ...any) error {
 func GetWithError[T any](ctx context.Context) (T, error) {
 	dc := GetDependencyContext(ctx)
 	var target T
-	err := dc.GetDependency(ctx, &target)
+	err := dc.FillDependency(ctx, &target)
 	return target, err
 }
 

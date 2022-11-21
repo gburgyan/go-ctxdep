@@ -75,14 +75,14 @@ const (
 var errorType = reflect.TypeOf((*error)(nil)).Elem()
 var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 
-// AddDependencies adds the given dependencies to the context. This will add all the deps
-// passed in and treat them as a generator if it's a function or a direct dependency
-// if it's not. Validation is done to ensure that any generators that have been added
-// to the context have parameters that can be resolved by the context. If there are
-// unresolved dependencies, this will panic.
+// addDependenciesAndInitialize adds the given dependencies to the context. This will add
+// all the dependencies passed in and treat them as a generator if it's a function or
+// a direct dependency if it's not. Validation is done to ensure that any generators that
+// have been addedto the context have parameters that can be resolved by the context. If
+// there are unresolved dependencies, this will panic.
 //
 // After adding the dependencies to the context, any immediate dependencies will be resolved.
-func (d *DependencyContext) AddDependencies(ctx context.Context, deps ...any) {
+func (d *DependencyContext) addDependenciesAndInitialize(ctx context.Context, deps ...any) {
 	d.addDependencies(deps, false)
 	d.resolveImmediateDependencies(ctx)
 }
@@ -144,7 +144,7 @@ func (d *DependencyContext) GetBatch(ctx context.Context, target ...any) {
 // if the target is not a pointer to something to be filled.
 func (d *DependencyContext) GetBatchWithError(ctx context.Context, targets ...any) error {
 	for _, target := range targets {
-		err := d.GetDependency(ctx, target)
+		err := d.FillDependency(ctx, target)
 		if err != nil {
 			return err
 		}
@@ -152,8 +152,8 @@ func (d *DependencyContext) GetBatchWithError(ctx context.Context, targets ...an
 	return nil
 }
 
-// GetDependency fills in the value of the target, or returns an error if it cannot.
-func (d *DependencyContext) GetDependency(ctx context.Context, target any) error {
+// FillDependency fills in the value of the target, or returns an error if it cannot.
+func (d *DependencyContext) FillDependency(ctx context.Context, target any) error {
 	s, t, err := d.findApplicableSlot(target)
 	if err != nil {
 		pdc := d.parentDependencyContext()

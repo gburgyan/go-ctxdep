@@ -75,7 +75,7 @@ func (d *DependencyContext) invokeSlotGenerator(ctx context.Context, activeSlot 
 		} else {
 			paramPointerValue := reflect.New(inType)
 			targetTypePointer := paramPointerValue.Interface()
-			err := d.GetDependency(ctx, targetTypePointer)
+			err := d.FillDependency(ctx, targetTypePointer)
 			if err != nil {
 				return nil, err
 			}
