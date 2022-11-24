@@ -60,7 +60,7 @@ type slot struct {
 	generator any
 	slotType  reflect.Type
 	lock      sync.Mutex
-	immediate bool
+	immediate *immediateDependencies
 	status    SlotStatus
 }
 
@@ -83,7 +83,7 @@ var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 //
 // After adding the dependencies to the context, any immediate dependencies will be resolved.
 func (d *DependencyContext) addDependenciesAndInitialize(ctx context.Context, deps ...any) {
-	d.addDependencies(deps, false)
+	d.addDependencies(deps, nil)
 	d.resolveImmediateDependencies(ctx)
 }
 
@@ -92,10 +92,10 @@ func (d *DependencyContext) addDependenciesAndInitialize(ctx context.Context, de
 // if it's not. Validation is done to ensure that any generators that have been added
 // to the context have parameters that can be resolved by the context. If there are
 // unresolved dependencies, this will panic.
-func (d *DependencyContext) addDependencies(deps []any, immediate bool) {
+func (d *DependencyContext) addDependencies(deps []any, immediate *immediateDependencies) {
 	for _, dep := range deps {
-		if immediateDependencies, ok := dep.(*immediateDependencies); ok {
-			d.addDependencies(immediateDependencies.dependencies, true)
+		if immediateWrapper, ok := dep.(*immediateDependencies); ok {
+			d.addDependencies(immediateWrapper.dependencies, immediateWrapper)
 		} else {
 			depType := reflect.TypeOf(dep)
 			depKind := depType.Kind()
