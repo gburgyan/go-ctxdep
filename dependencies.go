@@ -89,13 +89,16 @@ func (d *DependencyContext) addDependenciesAndInitialize(ctx context.Context, de
 
 // addDependencies adds the given dependencies to the context. This will add all the deps
 // passed in and treat them as a generator if it's a function or a direct dependency
-// if it's not. Validation is done to ensure that any generators that have been added
-// to the context have parameters that can be resolved by the context. If there are
-// unresolved dependencies, this will panic.
+// if it's not. If a slice any  is passed in, then the contents of the slice are evaluate as
+// if they were passed in directly. Validation is done to ensure that any generators that
+// have been added to the context have parameters that can be resolved by the context. If
+// there are unresolved dependencies, this will panic.
 func (d *DependencyContext) addDependencies(deps []any, immediate *immediateDependencies) {
 	for _, dep := range deps {
 		if immediateWrapper, ok := dep.(*immediateDependencies); ok {
 			d.addDependencies(immediateWrapper.dependencies, immediateWrapper)
+		} else if subSlice, ok := dep.([]any); ok {
+			d.addDependencies(subSlice, immediate)
 		} else {
 			depType := reflect.TypeOf(dep)
 			depKind := depType.Kind()

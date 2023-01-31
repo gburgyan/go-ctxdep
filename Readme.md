@@ -62,6 +62,27 @@ This works very similarly to how the base `context.WithValue()` system works: yo
 
 A key point is that the client code above *never* changes in how it works. Fundamental to the design is that you always ask for an object out of the context, and you receive it--it doesn't matter how that object got into the context, it just works. There are a couple of ways of doing this operation, but it is always the same in concept.
 
+## Slices
+
+A slice of values can be passed in to the dependencies. If a `[]any` is passed, those are flattened and evaluated as if they weren't in a sub-slice. This is to support a use case where several components return `[]any` for their dependencies. This is simply a helper to prevent having to manually concatenate slices before passing them to `NewDependencyContext`.
+
+```Go
+
+func componentADeps() []any {
+	return []any{ /* objects and generators */}
+}
+
+func componentBDeps() []any {
+    return []any{ /* objects and generators */}
+}
+
+func Processor(ctx context.Context) {
+    ctx = ctxdep.NewDependencyContext(ctx, componentADeps(), componentBDeps())
+    client(ctx)
+}
+
+```
+
 ## Interfaces
 
 The same process works with interfaces as well:

@@ -69,6 +69,25 @@ func Test_GeneratorAndObject(t *testing.T) {
 	assert.Equal(t, "*ctxdep.testImpl - direct value set\n*ctxdep.testWidget - created from generator: () *ctxdep.testWidget\nctxdep.testInterface - assigned from *ctxdep.testImpl", Status(ctx))
 }
 
+func Test_GeneratorAndObject_Slice(t *testing.T) {
+	depSlice := []any{func() *testWidget {
+		return &testWidget{val: 42}
+	}, &testImpl{val: 105}}
+
+	ctx := NewDependencyContext(context.Background(), depSlice)
+
+	assert.Equal(t, "*ctxdep.testImpl - direct value set\n*ctxdep.testWidget - uninitialized - generator: () *ctxdep.testWidget", Status(ctx))
+
+	widget := Get[*testWidget](ctx)
+	assert.Equal(t, 42, widget.val)
+
+	var iface testInterface
+	GetBatch(ctx, &iface)
+	assert.Equal(t, 105, iface.getVal())
+
+	assert.Equal(t, "*ctxdep.testImpl - direct value set\n*ctxdep.testWidget - created from generator: () *ctxdep.testWidget\nctxdep.testInterface - assigned from *ctxdep.testImpl", Status(ctx))
+}
+
 func Test_AddGenerator_MultiOutput(t *testing.T) {
 	calls := 0
 	creator := func(ctx context.Context) (*testWidget, *testDoodad) {
