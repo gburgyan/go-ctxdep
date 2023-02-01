@@ -108,14 +108,14 @@ func Test_AddGenerator_MultiOutput(t *testing.T) {
 
 func Test_AddGenerator_OnlyError(t *testing.T) {
 	// No valid return types
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, "generator must have at least one result value", func() {
 		NewDependencyContext(context.Background(), func(ctx context.Context) error {
 			return fmt.Errorf("expected error")
 		})
 	})
 
 	// Multiple errors
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, "multiple error results on a generator function not permitted", func() {
 		NewDependencyContext(context.Background(), func() (*testWidget, error, error) {
 			return nil, nil, nil
 		})
@@ -151,12 +151,12 @@ func Test_GeneratorWithError_Error(t *testing.T) {
 
 	var doodad *testDoodad
 	var widget *testWidget
-	assert.Panics(t, func() {
+	assert.PanicsWithError(t, "error running generator: *ctxdep.testDoodad (expected error)", func() {
 		GetBatch(ctx, &doodad, &widget)
 	})
 
 	dc := GetDependencyContext(ctx)
-	assert.Panics(t, func() {
+	assert.PanicsWithError(t, "error running generator: *ctxdep.testDoodad (expected error)", func() {
 		dc.GetBatch(ctx, &doodad, &widget)
 	})
 }
@@ -296,7 +296,7 @@ func Test_MultipleGenerators_Invalid(t *testing.T) {
 	f2 := func() *testDoodad { return nil }
 
 	// Two functions cannot return the same type, in this case the *testDoodad
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, "generator result type *ctxdep.testDoodad already exists--a generator may not override an existing slot", func() {
 		_ = NewDependencyContext(context.Background(), f1, f2)
 	})
 }
@@ -305,7 +305,7 @@ func Test_MultipleGenerators_UnresolvedDependency(t *testing.T) {
 	f := func(_ *testDoodad) *testWidget { return nil }
 
 	// The function needs a testDoodad, but there is no such thing in the context.
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, "generator for (*ctxdep.testDoodad) *ctxdep.testWidget has dependencies that cannot be resolved", func() {
 		_ = NewDependencyContext(context.Background(), f)
 	})
 }
@@ -330,14 +330,14 @@ func Test_UnknownDependencies(t *testing.T) {
 func Test_NoDependencyContext(t *testing.T) {
 	ctx := context.Background()
 	var widget *testWidget
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, "no dependency context available", func() {
 		GetBatch(ctx, &widget)
 	})
 }
 
 func Test_AddNilDependency(t *testing.T) {
 	var nilWidget *testWidget
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, "invalid nil value dependency for type *ctxdep.testWidget", func() {
 		NewDependencyContext(context.Background(), nilWidget)
 	})
 }
@@ -346,8 +346,14 @@ func Test_NonPointerGet(t *testing.T) {
 	ctx := NewDependencyContext(context.Background(), func() testWidget { return testWidget{val: 42} })
 
 	var doodad testDoodad
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, "target must be a pointer type: ctxdep.testDoodad", func() {
 		GetBatch(ctx, doodad)
+	})
+}
+
+func Test_InvalidDependencyType(t *testing.T) {
+	assert.PanicsWithValue(t, "invalid dependency: int", func() {
+		NewDependencyContext(context.Background(), 42)
 	})
 }
 

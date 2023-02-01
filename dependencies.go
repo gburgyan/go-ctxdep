@@ -102,10 +102,16 @@ func (d *DependencyContext) addDependencies(deps []any, immediate *immediateDepe
 		} else {
 			depType := reflect.TypeOf(dep)
 			depKind := depType.Kind()
-			if depKind == reflect.Func {
+
+			switch depKind {
+			case reflect.Func:
 				d.addGenerator(dep, immediate)
-			} else if depKind == reflect.Pointer {
+
+			case reflect.Pointer:
 				d.addValue(depType, dep)
+
+			default:
+				panic(fmt.Sprintf("invalid dependency: %s", depType.String()))
 			}
 		}
 	}
