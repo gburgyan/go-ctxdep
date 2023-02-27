@@ -146,10 +146,10 @@ func (d *DependencyContext) getGeneratorOutputSlots(activeSlot *slot) []*slot {
 	return result
 }
 
-// validateGeneratorForSlot verifies that the generator's dependencies can nominally be
+// isSlotValid verifies that the generator's dependencies can nominally be
 // fulfilled by the dependencies present. This does not check for cyclic dependencies as
 // that would be more expensive.
-func (d *DependencyContext) validateGeneratorForSlot(s *slot) bool {
+func (d *DependencyContext) isSlotValid(s *slot) bool {
 	if s.value != nil {
 		return true
 	}

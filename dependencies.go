@@ -78,7 +78,7 @@ var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 // addDependenciesAndInitialize adds the given dependencies to the context. This will add
 // all the dependencies passed in and treat them as a generator if it's a function or
 // a direct dependency if it's not. Validation is done to ensure that any generators that
-// have been addedto the context have parameters that can be resolved by the context. If
+// have been added to the context have parameters that can be resolved by the context. If
 // there are unresolved dependencies, this will panic.
 //
 // After adding the dependencies to the context, any immediate dependencies will be resolved.
@@ -116,7 +116,7 @@ func (d *DependencyContext) addDependencies(deps []any, immediate *immediateDepe
 		}
 	}
 	for _, s := range d.slots {
-		if !d.validateGeneratorForSlot(s) {
+		if !d.isSlotValid(s) {
 			panic(fmt.Sprintf("generator for %s has dependencies that cannot be resolved", formatGeneratorDebug(s.generator)))
 		}
 	}
