@@ -84,7 +84,18 @@ var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 // After adding the dependencies to the context, any immediate dependencies will be resolved.
 func (d *DependencyContext) addDependenciesAndInitialize(ctx context.Context, deps ...any) {
 	d.addDependencies(deps, nil)
+	d.validateDependencies()
 	d.resolveImmediateDependencies(ctx)
+}
+
+// validateDependencies ensures that everything that was added is in a consistent state. If
+// any dependencies exist that can't be fulfilled, this will `panic`.
+func (d *DependencyContext) validateDependencies() {
+	for _, s := range d.slots {
+		if !d.isSlotValid(s) {
+			panic(fmt.Sprintf("generator for %s has dependencies that cannot be resolved", formatGeneratorDebug(s.generator)))
+		}
+	}
 }
 
 // addDependencies adds the given dependencies to the context. This will add all the deps
@@ -113,11 +124,6 @@ func (d *DependencyContext) addDependencies(deps []any, immediate *immediateDepe
 			default:
 				panic(fmt.Sprintf("invalid dependency: %s", depType.String()))
 			}
-		}
-	}
-	for _, s := range d.slots {
-		if !d.isSlotValid(s) {
-			panic(fmt.Sprintf("generator for %s has dependencies that cannot be resolved", formatGeneratorDebug(s.generator)))
 		}
 	}
 }

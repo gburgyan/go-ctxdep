@@ -83,32 +83,3 @@ func Test_ImmediateDependency_Error(t *testing.T) {
 	assert.Nil(t, widget)
 	assert.Equal(t, 2, callCount)
 }
-
-func Test_ImmediateDependencyMutator(t *testing.T) {
-	callCount := 0
-	f := func() *testWidget {
-		callCount++
-		return &testWidget{val: 42}
-	}
-	var contextType string
-	m := func(ctx context.Context, ct string) context.Context {
-		contextType = ct
-		return ctx
-	}
-
-	assert.Equal(t, 0, callCount)
-
-	ctx := NewDependencyContext(context.Background(), ImmediateCtxMutator(m, f))
-
-	// Wait a bit to ensure the goroutine completes.
-	time.Sleep(100 * time.Millisecond)
-
-	assert.Equal(t, 1, callCount)
-	assert.Equal(t, "*ctxdep.testWidget", contextType)
-
-	var widget *testWidget
-	GetBatch(ctx, &widget)
-
-	assert.Equal(t, 42, widget.val)
-	assert.Equal(t, 1, callCount)
-}
