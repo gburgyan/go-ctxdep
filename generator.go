@@ -84,7 +84,14 @@ func (d *DependencyContext) invokeSlotGenerator(ctx context.Context, activeSlot 
 	}
 
 	gv := reflect.ValueOf(activeSlot.generator)
-	results := gv.Call(params)
+	var results []reflect.Value
+	if d.logger != nil {
+		d.logger.CallGenerator(formatGeneratorDebug(activeSlot.generator), func() {
+			results = gv.Call(params)
+		})
+	} else {
+		results = gv.Call(params)
+	}
 	return results, nil
 }
 
