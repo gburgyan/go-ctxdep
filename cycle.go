@@ -2,6 +2,8 @@ package ctxdep
 
 import (
 	"context"
+	"reflect"
+	"sync"
 )
 
 type cycle int
@@ -11,7 +13,8 @@ const cycleKey cycle = 0
 type unlocker func()
 
 type cycleChecker struct {
-	inProcess map[*slot]bool
+	inProcess map[reflect.Type]bool
+	lock      sync.Mutex
 }
 
 func enterSlotProcessing(ctx context.Context, s *slot) (context.Context, unlocker, error) {
@@ -20,7 +23,7 @@ func enterSlotProcessing(ctx context.Context, s *slot) (context.Context, unlocke
 	c := ctx.Value(cycleKey)
 	if c == nil {
 		checker = &cycleChecker{
-			inProcess: map[*slot]bool{},
+			inProcess: map[reflect.Type]bool{},
 		}
 		checkerCtx = context.WithValue(ctx, cycleKey, checker)
 	} else {
@@ -28,7 +31,10 @@ func enterSlotProcessing(ctx context.Context, s *slot) (context.Context, unlocke
 		checkerCtx = ctx
 	}
 
-	if _, found := checker.inProcess[s]; found {
+	genType := reflect.TypeOf(s.generator)
+	checker.lock.Lock()
+	defer checker.lock.Unlock()
+	if _, found := checker.inProcess[genType]; found {
 		dc := GetDependencyContext(ctx)
 		return nil, func() {}, &DependencyError{
 			Message:        "cyclic dependency error getting slot",
@@ -36,6 +42,11 @@ func enterSlotProcessing(ctx context.Context, s *slot) (context.Context, unlocke
 			Status:         dc.Status(),
 		}
 	}
-	checker.inProcess[s] = true
-	return checkerCtx, func() { delete(checker.inProcess, s) }, nil
+	checker.inProcess[genType] = true
+
+	return checkerCtx, func() {
+		checker.lock.Lock()
+		delete(checker.inProcess, genType)
+		checker.lock.Unlock()
+	}, nil
 }
