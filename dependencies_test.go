@@ -402,3 +402,49 @@ parent dependency context:
 ctxdep.testInterface - assigned from *ctxdep.testImpl`
 	assert.Equal(t, expected, Status(c2))
 }
+
+func Test_LooseDependency_concrete(t *testing.T) {
+	widgetA := &testWidget{
+		val: 23,
+	}
+	widgetB := &testWidget{
+		val: 42,
+	}
+	assert.Panics(t, func() {
+		NewDependencyContext(context.Background(), widgetA, widgetB)
+	})
+	ctx := NewLooseDependencyContext(context.Background(), widgetA, widgetB)
+	widget := Get[*testWidget](ctx)
+	assert.Equal(t, 42, widget.val)
+}
+
+func Test_LooseDependency_generator(t *testing.T) {
+	genA := func() *testWidget {
+		return &testWidget{
+			val: 23,
+		}
+	}
+	genB := func() *testWidget {
+		return &testWidget{
+			val: 42,
+		}
+	}
+	widgetC := &testWidget{
+		val: 105,
+	}
+	assert.Panics(t, func() {
+		NewDependencyContext(context.Background(), genA, widgetC)
+	})
+
+	ctx := NewLooseDependencyContext(context.Background(), genA, widgetC)
+	widget := Get[*testWidget](ctx)
+	assert.Equal(t, 105, widget.val)
+
+	ctx = NewLooseDependencyContext(context.Background(), genA, genB)
+	widget = Get[*testWidget](ctx)
+	assert.Equal(t, 42, widget.val)
+
+	ctx = NewLooseDependencyContext(context.Background(), widgetC, genA)
+	widget = Get[*testWidget](ctx)
+	assert.Equal(t, 105, widget.val)
+}

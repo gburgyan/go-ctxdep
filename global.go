@@ -8,11 +8,32 @@ import (
 // NewDependencyContext adds a new dependency context to the context stack and returns
 // the new context. It also adds any dependencies that are also passed in to the new
 // dependency context. For a further discussion on what dependencies do and how
-// they work, look at the documentation for DependencyContext.
+// they work, look at the documentation for DependencyContext. This applies strict
+// evaluation and will not allow multiple dependencies to ever fill a slot. If there
+// are multiple concrete types or generators can can fill a slot, this function
+// will `panic`.
 func NewDependencyContext(ctx context.Context, dependencies ...any) context.Context {
 	dc := &DependencyContext{
 		parentContext: ctx,
 		slots:         map[reflect.Type]*slot{},
+	}
+	newContext := context.WithValue(ctx, dependencyContextKey, dc)
+	dc.addDependenciesAndInitialize(newContext, dependencies...)
+	return newContext
+}
+
+// NewLooseDependencyContext adds a new dependency context to the context stack and returns
+// the new context. It also adds any dependencies that are also passed in to the new
+// dependency context. For a further discussion on what dependencies do and how
+// they work, look at the documentation for DependencyContext. This operates the same as
+// NewDependencyContext except that it allows for overrides of existing dependencies. In case
+// there are multiple dependencies that can fill a slot, the last concrete slot value will
+// be used. In case there is no concrete value, the last generator will win.
+func NewLooseDependencyContext(ctx context.Context, dependencies ...any) context.Context {
+	dc := &DependencyContext{
+		parentContext: ctx,
+		slots:         map[reflect.Type]*slot{},
+		loose:         true,
 	}
 	newContext := context.WithValue(ctx, dependencyContextKey, dc)
 	dc.addDependenciesAndInitialize(newContext, dependencies...)

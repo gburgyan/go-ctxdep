@@ -37,8 +37,14 @@ func (d *DependencyContext) addGenerator(generatorFunction any, immediate *immed
 	}
 
 	for _, resultType := range resultTypes {
-		if _, existing := d.slots[resultType]; existing {
-			panic(fmt.Sprintf("generator result type %v already exists--a generator may not override an existing slot", resultType))
+		if existingSlot, existing := d.slots[resultType]; existing {
+			if !d.loose {
+				panic(fmt.Sprintf("generator result type %v already exists--a generator may not override an existing slot", resultType))
+			}
+			if existingSlot.value != nil {
+				// Never override a concrete value
+				return
+			}
 		}
 		s := &slot{
 			value:     nil,
@@ -52,7 +58,7 @@ func (d *DependencyContext) addGenerator(generatorFunction any, immediate *immed
 	return
 }
 
-// getGeneratorError finds the error result from a generator, if it exists. If no error is present
+// getGeneratorError finds the error result from a generator, if it exists. If no error is present,
 // or it doesn't have an error, this returns nil.
 func (d *DependencyContext) getGeneratorError(results []reflect.Value) error {
 	for _, result := range results {
