@@ -34,6 +34,7 @@ func enterSlotProcessing(ctx context.Context, s *slot) (context.Context, unlocke
 	genType := reflect.TypeOf(s.generator)
 	checker.lock.Lock()
 	defer checker.lock.Unlock()
+
 	if _, found := checker.inProcess[genType]; found {
 		dc := GetDependencyContext(ctx)
 		return nil, func() {}, &DependencyError{
