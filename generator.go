@@ -71,17 +71,21 @@ func (d *DependencyContext) getGeneratorError(results []reflect.Value) error {
 
 // invokeSlotGenerator calls the slot's generator function and returns the results of the call.
 func (d *DependencyContext) invokeSlotGenerator(ctx context.Context, activeSlot *slot) ([]reflect.Value, error) {
+	hc := &hybridContext{
+		valueContext:  d.parentContext,
+		timingContext: ctx,
+	}
 	genType := reflect.TypeOf(activeSlot.generator)
 	inCount := genType.NumIn()
 	params := make([]reflect.Value, inCount)
 	for i := 0; i < inCount; i++ {
 		inType := genType.In(i)
 		if inType == contextType {
-			params[i] = reflect.ValueOf(ctx)
+			params[i] = reflect.ValueOf(hc)
 		} else {
 			paramPointerValue := reflect.New(inType)
 			targetTypePointer := paramPointerValue.Interface()
-			err := d.FillDependency(ctx, targetTypePointer)
+			err := d.FillDependency(hc, targetTypePointer)
 			if err != nil {
 				return nil, err
 			}
