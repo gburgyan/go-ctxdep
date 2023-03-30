@@ -17,7 +17,7 @@ type cycleChecker struct {
 	lock      sync.Mutex
 }
 
-func enterSlotProcessing(ctx context.Context, s *slot) (context.Context, unlocker, error) {
+func (d *DependencyContext) enterSlotProcessing(ctx context.Context, s *slot) (context.Context, unlocker, error) {
 	var checker *cycleChecker
 	var checkerCtx context.Context
 	c := ctx.Value(cycleKey)
@@ -36,11 +36,10 @@ func enterSlotProcessing(ctx context.Context, s *slot) (context.Context, unlocke
 	defer checker.lock.Unlock()
 
 	if _, found := checker.inProcess[genType]; found {
-		dc := GetDependencyContext(ctx)
 		return nil, func() {}, &DependencyError{
 			Message:        "cyclic dependency error getting slot",
 			ReferencedType: s.slotType,
-			Status:         dc.Status(),
+			Status:         d.Status(),
 		}
 	}
 	checker.inProcess[genType] = true
