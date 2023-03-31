@@ -420,3 +420,10 @@ Thile this is generally fine for production code, but it can cause annoyance whe
 
 When constructing a context "loosely," you can freely override concrete values and generators; the last one added will be used. In case that there are both generators and concrete values, the last value will be used; a generator will never override a value.
 
+## Special handling of contexts
+
+Any generators that are run will run from the context from which they were created. What this means is that there is no chance for a child dependency ever filling a requirement with a parent's dependency's generator.
+
+This is an important security feature. If a child dependency could fill a requirement for a parent's generator, data from one part of the code could pollute elsewhere because the results of the generators are saved for later use. This can also be a potential security vulnerability where the wrong data could potentially be used.
+
+There is special handling of the caller's context such that the deadlines and everything that comes from the context are still honored. If the caller's context times out, then a generator that respects the timeouts will properly abort. The result of that error is not cached.

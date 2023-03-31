@@ -18,6 +18,7 @@ func NewDependencyContext(ctx context.Context, dependencies ...any) context.Cont
 		slots:         map[reflect.Type]*slot{},
 	}
 	newContext := context.WithValue(ctx, dependencyContextKey, dc)
+	dc.selfContext = newContext
 	dc.addDependenciesAndInitialize(newContext, dependencies...)
 	return newContext
 }
@@ -36,6 +37,7 @@ func NewLooseDependencyContext(ctx context.Context, dependencies ...any) context
 		loose:         true,
 	}
 	newContext := context.WithValue(ctx, dependencyContextKey, dc)
+	dc.selfContext = newContext
 	dc.addDependenciesAndInitialize(newContext, dependencies...)
 	return newContext
 }
