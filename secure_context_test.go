@@ -3,6 +3,7 @@ package ctxdep
 import (
 	"context"
 	"github.com/stretchr/testify/assert"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -31,4 +32,20 @@ func Test_secureContext(t *testing.T) {
 	assert.NotNil(t, secCtx.Done())
 
 	assert.NotNil(t, valCtx2.Value(cycleKey))
+}
+
+func Test_ContextSecurity(t *testing.T) {
+	// This test looks janky because the context dependencies aren't
+	// designed to work with primitive types, but it does work.
+	gen := func(i *int) *string {
+		s := strconv.Itoa(*i)
+		return &s
+	}
+	i42 := 42
+	ctxA := NewDependencyContext(context.Background(), gen, &i42)
+
+	i105 := 105
+	ctxB := NewDependencyContext(ctxA, &i105)
+
+	assert.Equal(t, "42", *Get[*string](ctxB))
 }

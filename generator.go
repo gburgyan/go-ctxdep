@@ -71,9 +71,16 @@ func (d *DependencyContext) getGeneratorError(results []reflect.Value) error {
 
 // invokeSlotGenerator calls the slot's generator function and returns the results of the call.
 func (d *DependencyContext) invokeSlotGenerator(ctx context.Context, activeSlot *slot) ([]reflect.Value, error) {
-	sc := &secureContext{
-		baseContext:  d.selfContext,
-		innerContext: ctx,
+	var sc context.Context
+	if prevSc, ok := ctx.(*secureContext); ok {
+		// We don't need to keep wrapping contexts if they are already wrapped.
+		// This saves making the context chain too long in degenerate cases.
+		sc = prevSc
+	} else {
+		sc = &secureContext{
+			baseContext:  d.selfContext,
+			innerContext: ctx,
+		}
 	}
 
 	genType := reflect.TypeOf(activeSlot.generator)
