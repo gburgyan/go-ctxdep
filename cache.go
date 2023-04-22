@@ -1,8 +1,8 @@
 package ctxdep
 
 import (
-	"context"
 	"reflect"
+	"strings"
 	"time"
 )
 
@@ -12,15 +12,22 @@ import (
 type CacheKeyProvider interface {
 	// CacheKey returns a key that can be used to cache the result of a
 	// dependency. The key must be unique for the given dependency and
-	// the given context. The key must be a string or a value that can
-	// be converted to a string.
+	// the given context. This should be a string that is unique for
+	// the given dependency.
 	CacheKey() string
 }
+
+var cacheKeyProviderType = reflect.TypeOf((*CacheKeyProvider)(nil)).Elem()
 
 // Cache is an interface for a cache that can be used with the
 // Cacheable() function.
 type Cache interface {
-	Get(key string) (any, bool)
+	// Get returns the value for the given key, or nil if the key is
+	// not found.
+	Get(key string) any
+
+	// SetTTL sets the value for the given key, and sets the TTL for
+	// the key. If the TTL is 0, the key will not expire.
 	SetTTL(key string, value any, ttl time.Duration)
 }
 
@@ -39,26 +46,82 @@ type Cache interface {
 // implement the Cache interface by calling the Redis commands.
 // Or you can use a library like Ristretto to implement the Cache
 // interface by simply wrapping it.
-func Cacheable[K CacheKeyProvider, V any](cache Cache, generator func(ctx context.Context, key K) (V, error), ttl time.Duration) func(ctx context.Context, key K) (V, error) {
-	valueType := reflect.TypeOf([]V{}).Elem()
-	uniquePrefix := "DepCache-" + valueType.Elem().Name() + ":"
-
-	//f := reflect.FuncOf()
-	//v := reflect.MakeFunc()
-	//v.
-
-	// Return a function that caches the result of the generator
-	// function.
-	return func(ctx context.Context, key K) (V, error) {
-		cacheKey := uniquePrefix + key.CacheKey()
-		if value, ok := cache.Get(cacheKey); ok {
-			return value.(V), nil
-		}
-		value, err := generator(ctx, key)
-		if err != nil {
-			return reflect.New(valueType).Elem().Interface().(V), err
-		}
-		cache.SetTTL(cacheKey, value, ttl)
-		return value, nil
+func Cacheable(cache Cache, generator any, ttl time.Duration) any {
+	genType := reflect.TypeOf(generator)
+	if genType.Kind() != reflect.Func {
+		panic("generator must be a function")
 	}
+	genValue := reflect.ValueOf(generator)
+
+	// Gather the input and output types
+	inTypes := make([]reflect.Type, genType.NumIn())
+	for i := 0; i < genType.NumIn(); i++ {
+		in := genType.In(i)
+		if !in.ConvertibleTo(contextType) {
+			if !in.ConvertibleTo(cacheKeyProviderType) {
+				panic("generator must take a parameters of context or CacheKeyProvider")
+			}
+		}
+		inTypes[i] = in
+	}
+
+	outTypes := make([]reflect.Type, genType.NumOut())
+	for i := 0; i < genType.NumOut(); i++ {
+		outTypes[i] = genType.Out(i)
+	}
+
+	returnTypeKey := makeCachePrefix(outTypes)
+
+	return reflect.MakeFunc(genType, func(args []reflect.Value) []reflect.Value {
+		cacheKey := "DepCache:(" + makeCacheKey(args) + ")->" + returnTypeKey
+		value := cache.Get(cacheKey)
+		if value != nil {
+			return value.([]reflect.Value)
+		}
+
+		results := genValue.Call(args)
+
+		// Verify that the results are valid.
+		for _, result := range results {
+			if result.Type().ConvertibleTo(errorType) {
+				if !result.IsNil() {
+					// If there is an error, don't cache the result
+					return results
+				}
+			}
+		}
+
+		cache.SetTTL(cacheKey, results, ttl)
+		return results
+	}).Interface()
+}
+
+func makeCachePrefix(resultTypes []reflect.Type) string {
+	builder := strings.Builder{}
+	for _, resultType := range resultTypes {
+		if resultType.ConvertibleTo(errorType) {
+			continue
+		}
+		if builder.Len() > 0 {
+			builder.WriteString(":")
+		}
+		builder.WriteString(resultType.Elem().Name())
+	}
+	return builder.String()
+}
+
+func makeCacheKey(args []reflect.Value) string {
+	builder := strings.Builder{}
+	for _, arg := range args {
+		if arg.CanConvert(contextType) {
+			continue
+		}
+		if builder.Len() > 0 {
+			builder.WriteString(":")
+		}
+		if arg.CanConvert(cacheKeyProviderType) {
+			builder.WriteString(arg.Convert(cacheKeyProviderType).Interface().(CacheKeyProvider).CacheKey())
+		}
+	}
+	return builder.String()
 }
