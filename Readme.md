@@ -30,7 +30,7 @@ go get github.com/gburgyan/go-ctxdep
 
 # Features
 
-The basic feature of the go-ctxdep module is to provide a simple way to access needed dependencies away from where those dependencies were created. It provides ways of putting dependencies, which are simply instances of objects that can be pulled out later, into the context that is already there, then accessing them simply afterward. For objects that may be more costly to produce, dependencies can be represented by generators that are called when they are first referenced. In cases where it is known that an expensive dependency is needed, you can mark the generator to run immediately which will fire off the generator in a background goroutine to be able to give it as much of a head start as possible.
+The basic feature of the go-ctxdep module is to provide a simple way to access needed dependencies away from where those dependencies were created. It provides ways of putting dependencies, which are simply instances of objects that can be pulled out later, into the context that is already there, then accessing them simply afterward. For objects that may be more costly to produce, dependencies can be represented by generators that are called when they are first referenced. In cases where it is known that an expensive dependency is needed, you can mark the generator to run immediately which will fire off the generator in a background goroutine to be able to give it as much of a head start as possible. Additionally, you can also have a layer of caching on top of the generator so that the generator is only called once until the cache expires.
 
 It builds on top of the existing `context.Context` features of Go offering some user-friendly features. What it doesn't do is try to offer a full dependency injection framework. It simply allows a flexible set of objects to be stored in the context.
 
@@ -216,6 +216,58 @@ func HandleRequest(ctx context.Context, request *Request) *Response {
 ```
 
 The immediate generator starts running in a new goroutine to fill in its results. While it is running, access to its results is blocked. This allows the long-running function that, for example is calling another service, to get a head start in execution. Without the `Immediate` specification, the first access to the `*UserData` would run the generator. With it, the generator starts running much quicker and the request for the `*UserData` will block for less time.
+
+## Caching
+
+The dependency context can be configured to cache the results of the generators. This is useful for objects that are expensive to generate but are not expected to change within the time-to-live of the cache.
+
+To have the dependency context cache the results of a generator, simply add the `ctxdep.Cache` function to the generator:
+
+```go
+
+var cache = NewYourCacheType()
+
+func UserDataGenerator(ctx context.Context, userService *UserDataService, request *Request) (*UserData, error) {
+return userService.Lookup(request)
+
+}
+
+func HandleRequest(ctx context.Context, request *Request) *Response {
+    ctx = ctxdep.NewDependencyContext(ctx, &UserDataServiceCaller{}, 
+	        request, ctxdep.Cache(cache, UserDataGenerator, time.Minute * 15))
+    isPermitted(ctx)
+    ...
+}
+
+```
+
+In this case the call to the `UserDataGenerator` is wrapped in the `cache` call. This will cause the dependency context to cache the results of the generator for 15 minutes in this case. The results of this call will be cached in the `cache` object.
+
+The inputs for the generator must implement the `ctxdep.Cacheable` interface. This is:
+
+```go
+type Cacheable interface {
+    CacheKey() string
+}
+
+func (u *UserData) CacheKey() string {
+    return fmt.Sprintf("%d", u.Id)
+}
+```
+
+This will use the parameters that are passed to the generator to generate a key for the cache. The cache will then be used to store the results of the generator.
+
+The `cache` object is expected to implement the `ctxdep.Cache` interface. The `ctxdep.Cache` interface is:
+
+```go
+type Cache interface {
+    Get(key string) []reflect.Value
+    SetTTL(key string, value []reflect.Value, ttl time.Duration)
+    Lock(key string) func()
+}
+```
+
+The expectation is that this interface can wrap whatever caching system you want to use. Lock is used to ensure that only one goroutine is generating the value for a key at a time, however the implementation of that is not required -- you can simply return a no-op function or nil and things will function as expected. 
 
 # Why all this is important
 
