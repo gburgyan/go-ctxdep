@@ -120,7 +120,7 @@ func Test_Cache_Error(t *testing.T) {
 	callCount := 0
 	generator := func(ctx context.Context, key *inputValue) (*outputValue, error) {
 		callCount++
-		return nil, fmt.Errorf("error")
+		return &outputValue{}, fmt.Errorf("error")
 	}
 
 	input := &inputValue{Value: "1"}
@@ -131,6 +131,32 @@ func Test_Cache_Error(t *testing.T) {
 	assert.Error(t, err)
 	_, err = GetWithError[*outputValue](ctx)
 	assert.Error(t, err)
+
+	assert.Len(t, cache.values, 0)
+	assert.Equal(t, 2, callCount)
+}
+
+func Test_Cache_Nil(t *testing.T) {
+	cache := DumbCache{
+		values: make(map[string][]any),
+	}
+
+	callCount := 0
+	generator := func(ctx context.Context, key *inputValue) (*outputValue, error) {
+		callCount++
+		// Not an error, but also nil, which shouldn't be cached as it's not
+		// valid for a generator to return.
+		return nil, nil
+	}
+
+	input := &inputValue{Value: "1"}
+
+	ctx := NewDependencyContext(context.Background(), input, Cached(&cache, generator, time.Minute))
+
+	_, err := GetWithError[*outputValue](ctx)
+	assert.Error(t, err)
+	_, err = GetWithError[*outputValue](ctx)
+	assert.EqualError(t, err, "error mapping generator results to context: *ctxdep.outputValue (generator returned nil result: *ctxdep.outputValue)")
 
 	assert.Len(t, cache.values, 0)
 	assert.Equal(t, 2, callCount)
