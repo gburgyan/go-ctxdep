@@ -252,6 +252,8 @@ type Keyable interface {
 func (u *Request) CacheKey() string {
     return fmt.Sprintf("%d", u.Id)
 }
+
+// Similar for UserDataService. Perhaps the endpoint that's being called is a good key.
 ```
 
 This will use the parameters that are passed to the generator to generate a key for the cache. The cache will then be used to store the results of the generator.
