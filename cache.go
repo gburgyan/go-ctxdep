@@ -93,8 +93,15 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 	cachedGeneratorFunc := reflect.FuncOf(inTypes, outTypes, false)
 
 	return reflect.MakeFunc(cachedGeneratorFunc, func(args []reflect.Value) []reflect.Value {
+		var ctx context.Context
+		for _, arg := range args {
+			if arg.CanConvert(contextType) {
+				ctx = arg.Interface().(context.Context)
+				break
+			}
+		}
 		cacheKey := makeCacheKey(args) + "//" + returnTypeKey
-		values := cache.Get(nil, cacheKey)
+		values := cache.Get(ctx, cacheKey)
 		if values != nil {
 			cachedValueIndex := 0 // Note that we don't cache errors, so the index can differ.
 			returnVals := make([]reflect.Value, len(outTypes))
@@ -112,13 +119,6 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 				}
 			}
 			return returnVals
-		}
-		var ctx context.Context
-		for _, arg := range args {
-			if arg.CanConvert(contextType) {
-				ctx = arg.Interface().(context.Context)
-				break
-			}
 		}
 
 		// If the cache supports locking, lock the key.
@@ -150,7 +150,7 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 			cacheVals = append(cacheVals, result.Interface())
 		}
 
-		cache.SetTTL(nil, cacheKey, cacheVals, ttl)
+		cache.SetTTL(ctx, cacheKey, cacheVals, ttl)
 		return results
 	}).Interface()
 }

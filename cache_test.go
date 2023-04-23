@@ -35,6 +35,9 @@ type DumbCache struct {
 }
 
 func (d *DumbCache) Get(ctx context.Context, key string) []any {
+	if ctx == nil {
+		panic("ctx is nil")
+	}
 	value, ok := d.values[key]
 	if !ok {
 		return nil
@@ -43,10 +46,16 @@ func (d *DumbCache) Get(ctx context.Context, key string) []any {
 }
 
 func (d *DumbCache) SetTTL(ctx context.Context, key string, value []any, ttl time.Duration) {
+	if ctx == nil {
+		panic("ctx is nil")
+	}
 	d.values[key] = value
 }
 
 func (d *DumbCache) Lock(ctx context.Context, key string) func() {
+	if ctx == nil {
+		panic("ctx is nil")
+	}
 	d.lockCount++
 	return func() {
 		d.unlockCount++
