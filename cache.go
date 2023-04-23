@@ -14,16 +14,18 @@ import (
 type Keyable interface {
 	// CacheKey returns a key that can be used to cache the result of a
 	// dependency. The key must be unique for the given dependency.
+	// The intent is that the results of calling generators based on the
+	// value represented by this key will be invariant if the key is
+	// the same.
 	CacheKey() string
 }
 
 var keyableType = reflect.TypeOf((*Keyable)(nil)).Elem()
 
-// Cache is an interface for a cache that can be used with the
-// Cached() function. The cache must be safe for concurrent use.
-// The cache is not required to support locking, but if it does not
-// support locking then the generator function must be safe for
-// concurrent use.
+// Cache is an interface for a cache that can be used with the Cached() function.
+// The cache must be safe for concurrent use. The cache is not required to
+// support locking, but if it does not support locking then the generator
+// function must be safe for concurrent use.
 //
 // Internally this saves the results of the generator function in the cache.
 // While it is possible to persist the results, be aware that this may be tricky.
@@ -36,6 +38,8 @@ type Cache interface {
 
 	// SetTTL sets the value for the given key, and sets the TTL for
 	// the key. If the TTL is 0, the key will not expire.
+	// The value parameter is a slice of pointers to the results of
+	// the generator function.
 	SetTTL(ctx context.Context, key string, value []any, ttl time.Duration)
 
 	// Lock locks the given key. If the key is already locked, this
@@ -62,10 +66,14 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 	if genType.Kind() != reflect.Func {
 		panic("generator must be a function")
 	}
-	genValue := reflect.ValueOf(generator)
+
+	// Get this for later when we have to call it
+	baseGenerator := reflect.ValueOf(generator)
+
+	// Controls if we need to add a context parameter to the generator
+	hasContext := false
 
 	// Gather the input and output types
-	hasContext := false
 	inTypes := make([]reflect.Type, genType.NumIn())
 	for i := 0; i < genType.NumIn(); i++ {
 		in := genType.In(i)
@@ -88,7 +96,7 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 		outTypes[i] = genType.Out(i)
 	}
 
-	returnTypeKey := makeCachePrefix(outTypes)
+	returnTypeKey := generatorReturnTypes(outTypes)
 
 	cachedGeneratorFunc := reflect.FuncOf(inTypes, outTypes, false)
 
@@ -100,19 +108,19 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 				break
 			}
 		}
-		cacheKey := makeCacheKey(args) + "//" + returnTypeKey
-		values := cache.Get(ctx, cacheKey)
-		if values != nil {
+		cacheKey := generatorParamKeys(args) + "//" + returnTypeKey
+		cachedValues := cache.Get(ctx, cacheKey)
+		if cachedValues != nil {
 			cachedValueIndex := 0 // Note that we don't cache errors, so the index can differ.
 			returnVals := make([]reflect.Value, len(outTypes))
 			for i, outType := range outTypes {
 				if outType.ConvertibleTo(errorType) {
 					// The cached results should not contain errors, so just make nil errors.
-					nilErr := reflect.Zero(outType)
-					returnVals[i] = nilErr
+					returnVals[i] = reflect.Zero(outType)
 				} else {
+					// Populate the return value with the cached value.
 					val := reflect.New(outType).Elem()
-					cachedValue := reflect.ValueOf(values[cachedValueIndex])
+					cachedValue := reflect.ValueOf(cachedValues[cachedValueIndex])
 					cachedValueIndex++
 					val.Set(cachedValue)
 					returnVals[i] = val
@@ -133,7 +141,7 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 		if !hasContext {
 			funcArgs = funcArgs[:len(funcArgs)-1]
 		}
-		results := genValue.Call(funcArgs)
+		results := baseGenerator.Call(funcArgs)
 
 		cacheVals := make([]any, 0)
 		// Verify that the results are valid.
@@ -155,7 +163,10 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 	}).Interface()
 }
 
-func makeCachePrefix(resultTypes []reflect.Type) string {
+// generatorReturnTypes returns a string that represents the return
+// types of the generator function. This is used to generate a unique
+// signature for the given generator function.
+func generatorReturnTypes(resultTypes []reflect.Type) string {
 	builder := strings.Builder{}
 	for _, resultType := range resultTypes {
 		if resultType.ConvertibleTo(errorType) {
@@ -169,7 +180,9 @@ func makeCachePrefix(resultTypes []reflect.Type) string {
 	return builder.String()
 }
 
-func makeCacheKey(args []reflect.Value) string {
+// generatorParamKeys returns a string that represents the parameters
+// of the generator function.
+func generatorParamKeys(args []reflect.Value) string {
 	builder := strings.Builder{}
 	for _, arg := range args {
 		if arg.CanConvert(contextType) {
