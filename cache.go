@@ -1,6 +1,7 @@
 package ctxdep
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"time"
@@ -31,11 +32,11 @@ var keyableType = reflect.TypeOf((*Keyable)(nil)).Elem()
 type Cache interface {
 	// Get returns the value for the given key, or nil if the key is
 	// not found.
-	Get(key string) []any
+	Get(ctx context.Context, key string) []any
 
 	// SetTTL sets the value for the given key, and sets the TTL for
 	// the key. If the TTL is 0, the key will not expire.
-	SetTTL(key string, value []any, ttl time.Duration)
+	SetTTL(ctx context.Context, key string, value []any, ttl time.Duration)
 
 	// Lock locks the given key. If the key is already locked, this
 	// will block until the key is unlocked. The returned function
@@ -43,7 +44,7 @@ type Cache interface {
 	// multiple goroutines from calling the generator function for
 	// the same key. This is optional; if the cache does not support
 	// locking, it can return nil or no-op function.
-	Lock(key string) func()
+	Lock(ctx context.Context, key string) func()
 }
 
 // Cached returns a function that caches the result of the given
@@ -64,15 +65,22 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 	genValue := reflect.ValueOf(generator)
 
 	// Gather the input and output types
+	hasContext := false
 	inTypes := make([]reflect.Type, genType.NumIn())
 	for i := 0; i < genType.NumIn(); i++ {
 		in := genType.In(i)
-		if !in.ConvertibleTo(contextType) {
-			if !in.ConvertibleTo(keyableType) {
-				panic("generator must take a parameters of context or Keyable")
-			}
+		if in.ConvertibleTo(contextType) {
+			hasContext = true
+		} else if !in.ConvertibleTo(keyableType) {
+			panic("generator must take a parameters of context or Keyable")
 		}
 		inTypes[i] = in
+	}
+
+	// If the generator does not take a context, add one. We'll remove
+	// this later when we call the actual generator function.
+	if !hasContext {
+		inTypes = append(inTypes, contextType)
 	}
 
 	outTypes := make([]reflect.Type, genType.NumOut())
@@ -82,9 +90,11 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 
 	returnTypeKey := makeCachePrefix(outTypes)
 
-	return reflect.MakeFunc(genType, func(args []reflect.Value) []reflect.Value {
-		cacheKey := "DepCache:(" + makeCacheKey(args) + ")->" + returnTypeKey
-		values := cache.Get(cacheKey)
+	cachedGeneratorFunc := reflect.FuncOf(inTypes, outTypes, false)
+
+	return reflect.MakeFunc(cachedGeneratorFunc, func(args []reflect.Value) []reflect.Value {
+		cacheKey := makeCacheKey(args) + "//" + returnTypeKey
+		values := cache.Get(nil, cacheKey)
 		if values != nil {
 			cachedValueIndex := 0 // Note that we don't cache errors, so the index can differ.
 			returnVals := make([]reflect.Value, len(outTypes))
@@ -103,15 +113,27 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 			}
 			return returnVals
 		}
+		var ctx context.Context
+		for _, arg := range args {
+			if arg.CanConvert(contextType) {
+				ctx = arg.Interface().(context.Context)
+				break
+			}
+		}
 
 		// If the cache supports locking, lock the key.
-		unlock := cache.Lock(cacheKey)
+		unlock := cache.Lock(ctx, cacheKey)
 		if unlock != nil {
 			// If we have an unlocker, unlock the key when we return.
 			defer unlock()
 		}
 
-		results := genValue.Call(args)
+		// If we added a context, then it'll be at the end. Remove it if we added it.
+		funcArgs := args
+		if !hasContext {
+			funcArgs = funcArgs[:len(funcArgs)-1]
+		}
+		results := genValue.Call(funcArgs)
 
 		cacheVals := make([]any, 0)
 		// Verify that the results are valid.
@@ -128,7 +150,7 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 			cacheVals = append(cacheVals, result.Interface())
 		}
 
-		cache.SetTTL(cacheKey, cacheVals, ttl)
+		cache.SetTTL(nil, cacheKey, cacheVals, ttl)
 		return results
 	}).Interface()
 }

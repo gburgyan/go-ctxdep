@@ -262,9 +262,9 @@ The `cache` object is expected to implement the `ctxdep.Cache` interface. The `c
 
 ```go
 type Cache interface {
-    Get(key string) []any
-    SetTTL(key string, value []any, ttl time.Duration)
-    Lock(key string) func()
+    Get(ctx context.Context, key string) []any
+    SetTTL(ctx context.Context, key string, value []any, ttl time.Duration)
+    Lock(ctx context.Context, key string) func()
 }
 ```
 

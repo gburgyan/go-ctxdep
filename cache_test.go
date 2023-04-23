@@ -34,7 +34,7 @@ type DumbCache struct {
 	unlockCount int
 }
 
-func (d *DumbCache) Get(key string) []any {
+func (d *DumbCache) Get(ctx context.Context, key string) []any {
 	value, ok := d.values[key]
 	if !ok {
 		return nil
@@ -42,11 +42,11 @@ func (d *DumbCache) Get(key string) []any {
 	return value
 }
 
-func (d *DumbCache) SetTTL(key string, value []any, ttl time.Duration) {
+func (d *DumbCache) SetTTL(ctx context.Context, key string, value []any, ttl time.Duration) {
 	d.values[key] = value
 }
 
-func (d *DumbCache) Lock(key string) func() {
+func (d *DumbCache) Lock(ctx context.Context, key string) func() {
 	d.lockCount++
 	return func() {
 		d.unlockCount++
@@ -72,7 +72,7 @@ func Test_Cache(t *testing.T) {
 	ctx2 := NewDependencyContext(context.Background(), input, Cached(&cache, generator, time.Minute))
 	r2 := Get[*outputValue](ctx2)
 
-	assert.Contains(t, cache.values, "DepCache:(1)->outputValue")
+	assert.Contains(t, cache.values, "1//outputValue")
 	assert.Equal(t, 1, callCount)
 	assert.Equal(t, "1", r1.Value)
 	assert.Equal(t, "1", r2.Value)
@@ -102,7 +102,7 @@ func Test_CacheComplex(t *testing.T) {
 	r2a := Get[*outputValue](ctx2)
 	r2b := Get[*testDoodad](ctx2)
 
-	assert.Contains(t, cache.values, "DepCache:(1:2)->outputValue:testDoodad")
+	assert.Contains(t, cache.values, "1:2//outputValue:testDoodad")
 	assert.Equal(t, 1, callCount)
 	assert.Equal(t, "1", r1a.Value)
 	assert.Equal(t, "2", r1b.val)
