@@ -228,8 +228,7 @@ To have the dependency context cache the results of a generator, simply add the 
 var cache = NewYourCacheType()
 
 func UserDataGenerator(ctx context.Context, userService *UserDataService, request *Request) (*UserData, error) {
-return userService.Lookup(request)
-
+    return userService.Lookup(request)
 }
 
 func HandleRequest(ctx context.Context, request *Request) *Response {
@@ -243,14 +242,14 @@ func HandleRequest(ctx context.Context, request *Request) *Response {
 
 In this case the call to the `UserDataGenerator` is wrapped in the `cache` call. This will cause the dependency context to cache the results of the generator for 15 minutes in this case. The results of this call will be cached in the `cache` object.
 
-The inputs for the generator must implement the `ctxdep.Cacheable` interface. This is:
+The inputs for the generator must implement the `ctxdep.Keyable` interface. This is:
 
 ```go
-type Cacheable interface {
+type Keyable interface {
     CacheKey() string
 }
 
-func (u *UserData) CacheKey() string {
+func (u *Request) CacheKey() string {
     return fmt.Sprintf("%d", u.Id)
 }
 ```
@@ -261,8 +260,8 @@ The `cache` object is expected to implement the `ctxdep.Cache` interface. The `c
 
 ```go
 type Cache interface {
-    Get(key string) []reflect.Value
-    SetTTL(key string, value []reflect.Value, ttl time.Duration)
+    Get(key string) []any
+    SetTTL(key string, value []any, ttl time.Duration)
     Lock(key string) func()
 }
 ```

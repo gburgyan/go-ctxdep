@@ -6,17 +6,17 @@ import (
 	"time"
 )
 
-// Cacheable is an interface that can be implemented by a
+// Keyable is an interface that can be implemented by a
 // dependency to provide a unique key that can be used to cache the
 // result of the dependency. Implementing this interface is required
 // if you want to use the Cached() function.
-type Cacheable interface {
+type Keyable interface {
 	// CacheKey returns a key that can be used to cache the result of a
 	// dependency. The key must be unique for the given dependency.
 	CacheKey() string
 }
 
-var cacheKeyProviderType = reflect.TypeOf((*Cacheable)(nil)).Elem()
+var keyableType = reflect.TypeOf((*Keyable)(nil)).Elem()
 
 // Cache is an interface for a cache that can be used with the
 // Cached() function. The cache must be safe for concurrent use.
@@ -25,16 +25,17 @@ var cacheKeyProviderType = reflect.TypeOf((*Cacheable)(nil)).Elem()
 // concurrent use.
 //
 // Internally this saves the results of the generator function in the cache.
-// While it is possible to persist the results, be aware that this may be tricky
-// since these are raw reflect.Value objects.
+// While it is possible to persist the results, be aware that this may be tricky.
+// The cache will be passed a slice of arbitrary pointers to the results of the
+// generator function.
 type Cache interface {
 	// Get returns the value for the given key, or nil if the key is
 	// not found.
-	Get(key string) []reflect.Value
+	Get(key string) []any
 
 	// SetTTL sets the value for the given key, and sets the TTL for
 	// the key. If the TTL is 0, the key will not expire.
-	SetTTL(key string, value []reflect.Value, ttl time.Duration)
+	SetTTL(key string, value []any, ttl time.Duration)
 
 	// Lock locks the given key. If the key is already locked, this
 	// will block until the key is unlocked. The returned function
@@ -67,8 +68,8 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 	for i := 0; i < genType.NumIn(); i++ {
 		in := genType.In(i)
 		if !in.ConvertibleTo(contextType) {
-			if !in.ConvertibleTo(cacheKeyProviderType) {
-				panic("generator must take a parameters of context or Cacheable")
+			if !in.ConvertibleTo(keyableType) {
+				panic("generator must take a parameters of context or Keyable")
 			}
 		}
 		inTypes[i] = in
@@ -85,7 +86,22 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 		cacheKey := "DepCache:(" + makeCacheKey(args) + ")->" + returnTypeKey
 		values := cache.Get(cacheKey)
 		if values != nil {
-			return values
+			cachedValueIndex := 0 // Note that we don't cache errors, so the index can differ.
+			returnVals := make([]reflect.Value, len(outTypes))
+			for i, outType := range outTypes {
+				if outType.ConvertibleTo(errorType) {
+					// The cached results should not contain errors, so just make nil errors.
+					nilErr := reflect.Zero(outType)
+					returnVals[i] = nilErr
+				} else {
+					val := reflect.New(outType).Elem()
+					cachedValue := reflect.ValueOf(values[cachedValueIndex])
+					cachedValueIndex++
+					val.Set(cachedValue)
+					returnVals[i] = val
+				}
+			}
+			return returnVals
 		}
 
 		// If the cache supports locking, lock the key.
@@ -97,6 +113,7 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 
 		results := genValue.Call(args)
 
+		cacheVals := make([]any, 0)
 		// Verify that the results are valid.
 		for _, result := range results {
 			if result.Type().ConvertibleTo(errorType) {
@@ -104,10 +121,14 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 					// If there is an error, don't cache the result
 					return results
 				}
+			} else if result.IsZero() {
+				// If the result is nil, don't cache the result
+				return results
 			}
+			cacheVals = append(cacheVals, result.Interface())
 		}
 
-		cache.SetTTL(cacheKey, results, ttl)
+		cache.SetTTL(cacheKey, cacheVals, ttl)
 		return results
 	}).Interface()
 }
@@ -135,8 +156,8 @@ func makeCacheKey(args []reflect.Value) string {
 		if builder.Len() > 0 {
 			builder.WriteString(":")
 		}
-		if arg.CanConvert(cacheKeyProviderType) {
-			builder.WriteString(arg.Convert(cacheKeyProviderType).Interface().(Cacheable).CacheKey())
+		if arg.CanConvert(keyableType) {
+			builder.WriteString(arg.Convert(keyableType).Interface().(Keyable).CacheKey())
 		}
 	}
 	return builder.String()

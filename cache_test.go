@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/stretchr/testify/assert"
-	"reflect"
 	"testing"
 	"time"
 )
@@ -30,12 +29,12 @@ type outputValue struct {
 }
 
 type DumbCache struct {
-	values      map[string][]reflect.Value
+	values      map[string][]any
 	lockCount   int
 	unlockCount int
 }
 
-func (d *DumbCache) Get(key string) []reflect.Value {
+func (d *DumbCache) Get(key string) []any {
 	value, ok := d.values[key]
 	if !ok {
 		return nil
@@ -43,7 +42,7 @@ func (d *DumbCache) Get(key string) []reflect.Value {
 	return value
 }
 
-func (d *DumbCache) SetTTL(key string, value []reflect.Value, ttl time.Duration) {
+func (d *DumbCache) SetTTL(key string, value []any, ttl time.Duration) {
 	d.values[key] = value
 }
 
@@ -56,7 +55,7 @@ func (d *DumbCache) Lock(key string) func() {
 
 func Test_Cache(t *testing.T) {
 	cache := DumbCache{
-		values: make(map[string][]reflect.Value),
+		values: make(map[string][]any),
 	}
 
 	callCount := 0
@@ -83,7 +82,7 @@ func Test_Cache(t *testing.T) {
 
 func Test_CacheComplex(t *testing.T) {
 	cache := DumbCache{
-		values: make(map[string][]reflect.Value),
+		values: make(map[string][]any),
 	}
 
 	callCount := 0
@@ -115,7 +114,7 @@ func Test_CacheComplex(t *testing.T) {
 
 func Test_Cache_Error(t *testing.T) {
 	cache := DumbCache{
-		values: make(map[string][]reflect.Value),
+		values: make(map[string][]any),
 	}
 
 	callCount := 0
@@ -139,7 +138,7 @@ func Test_Cache_Error(t *testing.T) {
 
 func Test_Cache_NonFunction(t *testing.T) {
 	cache := DumbCache{
-		values: make(map[string][]reflect.Value),
+		values: make(map[string][]any),
 	}
 
 	input := &inputValue{Value: "1"}
@@ -151,14 +150,14 @@ func Test_Cache_NonFunction(t *testing.T) {
 
 func Test_Cache_NonCacheable(t *testing.T) {
 	cache := DumbCache{
-		values: make(map[string][]reflect.Value),
+		values: make(map[string][]any),
 	}
 
 	generator := func(ctx context.Context, widget *testWidget) (*outputValue, error) {
 		return nil, nil
 	}
 
-	assert.PanicsWithValue(t, "generator must take a parameters of context or Cacheable", func() {
+	assert.PanicsWithValue(t, "generator must take a parameters of context or Keyable", func() {
 		NewDependencyContext(context.Background(), &testWidget{}, Cached(&cache, generator, time.Minute))
 	})
 }
