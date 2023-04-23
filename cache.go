@@ -151,6 +151,7 @@ func Cached(cache Cache, generator any, ttl time.Duration) any {
 					// If there is an error, don't cache the result
 					return results
 				}
+				continue
 			} else if result.IsZero() {
 				// If the result is nil, don't cache the result
 				return results
