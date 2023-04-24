@@ -277,10 +277,12 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 	// Before locking this slot, ensure that we're not in a cyclic dependency. If we are,
 	// return an error. Otherwise, the lock call would deadlock.
 	cycleCtx, unlocker, err := d.enterSlotProcessing(ctx, activeSlot)
+	if unlocker != nil {
+		defer unlocker()
+	}
 	if err != nil {
 		return err
 	}
-	defer unlocker()
 
 	// Preemptively lock all the potential outputs from a generator for this slot, if it exists. We
 	// need to ensure that the locks are acquired in the same order in all cases to prevent potential

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/stretchr/testify/assert"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -183,16 +184,17 @@ func Test_Cache_NonFunction(t *testing.T) {
 	})
 }
 
-func Test_Cache_NonCacheable(t *testing.T) {
+func Test_Cache_NonKeyed(t *testing.T) {
 	cache := DumbCache{
 		values: make(map[string][]any),
 	}
 
 	generator := func(ctx context.Context, widget *testWidget) (*outputValue, error) {
-		return nil, nil
+		return &outputValue{Value: strconv.Itoa(widget.val)}, nil
 	}
 
-	assert.PanicsWithValue(t, "generator must take a parameters of context or Keyable", func() {
-		NewDependencyContext(context.Background(), &testWidget{}, Cached(&cache, generator, time.Minute))
-	})
+	ctx := NewDependencyContext(context.Background(), &testWidget{val: 42}, Cached(&cache, generator, time.Minute))
+	ov := Get[*outputValue](ctx)
+	assert.Contains(t, cache.values, "testWidget//outputValue")
+	assert.Equal(t, "42", ov.Value)
 }
