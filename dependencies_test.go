@@ -274,7 +274,8 @@ func Test_MultiLevelDependencies_Param(t *testing.T) {
 
 	c2 := NewDependencyContext(c1, func(w *testWidget) *testDoodad { return &testDoodad{val: fmt.Sprintf("Doodad: %d", w.val)} })
 
-	doodad := Get[*testDoodad](c2)
+	_ = Get[*testDoodad](c2)
+	doodad := Get[*testDoodad](c2) // Ensure that it was properly added to the child context.
 
 	assert.Equal(t, "Doodad: 42", doodad.val)
 	assert.Equal(t, "*ctxdep.testDoodad - created from generator: (*ctxdep.testWidget) *ctxdep.testDoodad\n*ctxdep.testWidget - imported from parent context\n----\nparent dependency context:\n*ctxdep.testWidget - created from generator: () *ctxdep.testWidget", Status(c2))

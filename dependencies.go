@@ -205,8 +205,10 @@ func (d *DependencyContext) FillDependency(ctx context.Context, target any) erro
 			err = pdc.GetBatchWithError(ctx, target)
 			if err == nil {
 				// Hoist the parent dependency to this level to save time on future calls.
+				// At this point the target is a pointer to a pointer to the value, so we
+				// have to unwrap one level of indirection.
 				d.slots[t] = &slot{
-					value:     target,
+					value:     reflect.ValueOf(target).Elem().Interface(),
 					generator: nil,
 					slotType:  t,
 					status:    StatusFromParent,
