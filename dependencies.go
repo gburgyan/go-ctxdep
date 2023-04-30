@@ -129,12 +129,14 @@ func (d *DependencyContext) addDependencies(deps []any, immediate *immediateDepe
 			d.parentFixed = true
 			continue
 		}
-		d.parentFixed = true
 		if immediateWrapper, ok := dep.(*immediateDependencies); ok {
+			d.parentFixed = true
 			d.addDependencies(immediateWrapper.dependencies, immediateWrapper)
 		} else if subSlice, ok := dep.([]any); ok {
 			d.addDependencies(subSlice, immediate)
+			d.parentFixed = true
 		} else {
+			d.parentFixed = true
 			depType := reflect.TypeOf(dep)
 			depKind := depType.Kind()
 
