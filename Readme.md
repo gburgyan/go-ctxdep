@@ -473,6 +473,10 @@ Thile this is generally fine for production code, but it can cause annoyance whe
 
 When constructing a context "loosely," you can freely override concrete values and generators; the last one added will be used. In case that there are both generators and concrete values, the last value will be used; a generator will never override a value.
 
+## Overriding the parent context
+
+In certain cases you need to reuse a parent context because whatever created the context you have did not properly copy the context. We've encountered this with gRPC services having a parent context of `context.Background()`. If you pass a context as the first dependency parameter when you `NewDependencyContext`, you can override where parent dependencies are looked up. Note that this only works when you pass the context as the first parameter to `NewDependencyContext`.
+
 ## Special handling of contexts
 
 Any generators that are run will run from the context from which they were created. What this means is that there is no chance for a child dependency ever filling a requirement with a parent's dependency's generator.

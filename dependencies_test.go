@@ -448,3 +448,29 @@ func Test_LooseDependency_generator(t *testing.T) {
 	widget = Get[*testWidget](ctx)
 	assert.Equal(t, 105, widget.val)
 }
+
+func Test_ParentContextOverride(t *testing.T) {
+	widget := &testWidget{
+		val: 23,
+	}
+	rootCtx := NewDependencyContext(context.Background(), widget)
+
+	ctx := NewDependencyContext(context.Background(), rootCtx, &testDoodad{val: "wo0t"})
+
+	ctxWidget := Get[*testWidget](ctx)
+	assert.Equal(t, 23, ctxWidget.val)
+
+	doodad := Get[*testDoodad](ctx)
+	assert.Equal(t, "wo0t", doodad.val)
+}
+
+func Test_ParentContextOverride_error(t *testing.T) {
+	widget := &testWidget{
+		val: 23,
+	}
+	rootCtx := NewDependencyContext(context.Background(), widget)
+
+	assert.PanicsWithValue(t, "cannot override parent context", func() {
+		NewDependencyContext(context.Background(), &testDoodad{val: "wo0t"}, rootCtx)
+	})
+}

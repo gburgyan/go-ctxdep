@@ -62,6 +62,10 @@ type DependencyContext struct {
 	// that is running. The default value of `false` will cause `panic`s if there are multiple
 	// dependencies for the same type.
 	loose bool
+
+	// parentFixed controls if we are in a position to override the parent context. This
+	// is only usable by the first added dependency.
+	parentFixed bool
 }
 
 // slot stored the internal state of a dependency slot.
@@ -116,6 +120,16 @@ func (d *DependencyContext) validateDependencies() {
 // there are unresolved dependencies, this will panic.
 func (d *DependencyContext) addDependencies(deps []any, immediate *immediateDependencies) {
 	for _, dep := range deps {
+		// If this is the first dependency added we can override the parent context.
+		if ctx, ok := dep.(context.Context); ok {
+			if d.parentFixed {
+				panic("cannot override parent context")
+			}
+			d.parentContext = ctx
+			d.parentFixed = true
+			continue
+		}
+		d.parentFixed = true
 		if immediateWrapper, ok := dep.(*immediateDependencies); ok {
 			d.addDependencies(immediateWrapper.dependencies, immediateWrapper)
 		} else if subSlice, ok := dep.([]any); ok {
