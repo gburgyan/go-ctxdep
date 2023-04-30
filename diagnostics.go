@@ -18,7 +18,9 @@ func (d *DependencyContext) Status() string {
 	slotVals := map[string]string{}
 	var slotKeys []string
 
-	for t, s := range d.slots {
+	d.slots.Range(func(key, value any) bool {
+		t := key.(reflect.Type)
+		s := value.(*slot)
 		keyString := fmt.Sprintf("%v", t)
 		if t == s.slotType {
 			var slotLine string
@@ -43,7 +45,8 @@ func (d *DependencyContext) Status() string {
 			slotVals[keyString] = fmt.Sprintf("%v - assigned from %v", t, s.slotType)
 		}
 		slotKeys = append(slotKeys, keyString)
-	}
+		return true
+	})
 
 	sort.Strings(slotKeys)
 

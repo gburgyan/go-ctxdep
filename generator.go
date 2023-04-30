@@ -37,7 +37,8 @@ func (d *DependencyContext) addGenerator(generatorFunction any, immediate *immed
 	}
 
 	for _, resultType := range resultTypes {
-		if existingSlot, existing := d.slots[resultType]; existing {
+		if existingSlotA, existing := d.slots.Load(resultType); existing {
+			existingSlot := existingSlotA.(*slot)
 			if !d.loose {
 				panic(fmt.Sprintf("generator result type %v already exists--a generator may not override an existing slot", resultType))
 			}
@@ -46,6 +47,7 @@ func (d *DependencyContext) addGenerator(generatorFunction any, immediate *immed
 				return
 			}
 		}
+
 		s := &slot{
 			value:     nil,
 			generator: generatorFunction,
@@ -53,7 +55,7 @@ func (d *DependencyContext) addGenerator(generatorFunction any, immediate *immed
 			immediate: immediate,
 			status:    StatusGenerator,
 		}
-		d.slots[resultType] = s
+		d.slots.Store(resultType, s)
 	}
 	return
 }
@@ -129,7 +131,8 @@ func (d *DependencyContext) mapGeneratorResults(results []reflect.Value, targetT
 		}
 
 		// Now save the result value to the slot for later use.
-		if resultSlot, ok := d.slots[resultType]; ok {
+		if resultSlotA, ok := d.slots.Load(resultType); ok {
+			resultSlot := resultSlotA.(*slot)
 			if resultSlot.value == nil {
 				resultSlot.value = result.Interface()
 				resultSlot.status = StatusGenerator
@@ -137,7 +140,7 @@ func (d *DependencyContext) mapGeneratorResults(results []reflect.Value, targetT
 		} else {
 			// We should never get this since the addGenerator call
 			// should have pre-created these.
-			d.slots[resultType] = &slot{value: result.Interface(), status: StatusGenerator}
+			d.slots.Store(resultType, &slot{value: result.Interface(), status: StatusGenerator})
 		}
 	}
 	return nil
@@ -159,7 +162,12 @@ func (d *DependencyContext) getGeneratorOutputSlots(activeSlot *slot) []*slot {
 			// Errors are not a type of slot.
 			continue
 		}
-		result = append(result, d.slots[retType])
+		sa, ok := d.slots.Load(retType)
+		if !ok {
+			// This should be impossible.
+			panic("generator output slot not found")
+		}
+		result = append(result, sa.(*slot))
 	}
 	return result
 }

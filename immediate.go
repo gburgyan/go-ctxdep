@@ -29,8 +29,8 @@ func (d *DependencyContext) resolveImmediateDependencies(ctx context.Context) {
 	// they eventually unblocked the dependency will already have been resolved
 	// so the generation will not get invoked again. The additional overhead is
 	// the cost of creation of the extra goroutines and the locks.
-	for _, slot := range d.slots {
-		slot := slot
+	d.slots.Range(func(_, sa any) bool {
+		slot := sa.(*slot)
 		if slot.immediate != nil {
 			go func() {
 				target := reflect.New(slot.slotType)
@@ -45,5 +45,6 @@ func (d *DependencyContext) resolveImmediateDependencies(ctx context.Context) {
 				}
 			}()
 		}
-	}
+		return true
+	})
 }

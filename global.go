@@ -2,7 +2,7 @@ package ctxdep
 
 import (
 	"context"
-	"reflect"
+	"sync"
 )
 
 // NewDependencyContext adds a new dependency context to the context stack and returns
@@ -15,7 +15,7 @@ import (
 func NewDependencyContext(ctx context.Context, dependencies ...any) context.Context {
 	dc := &DependencyContext{
 		parentContext: ctx,
-		slots:         map[reflect.Type]*slot{},
+		slots:         sync.Map{},
 	}
 	newContext := context.WithValue(ctx, dependencyContextKey, dc)
 	dc.selfContext = newContext
@@ -33,7 +33,7 @@ func NewDependencyContext(ctx context.Context, dependencies ...any) context.Cont
 func NewLooseDependencyContext(ctx context.Context, dependencies ...any) context.Context {
 	dc := &DependencyContext{
 		parentContext: ctx,
-		slots:         map[reflect.Type]*slot{},
+		slots:         sync.Map{},
 		loose:         true,
 	}
 	newContext := context.WithValue(ctx, dependencyContextKey, dc)

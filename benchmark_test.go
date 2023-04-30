@@ -30,7 +30,8 @@ func BenchmarkGetSimpleGenerator(b *testing.B) {
 	})
 	dc := GetDependencyContext(ctx)
 	t := reflect.TypeOf(&testWidget{})
-	s := dc.slots[t]
+	sa, _ := dc.slots.Load(t)
+	s := sa.(*slot)
 
 	for i := 0; i < b.N; i++ {
 		_ = Get[*testWidget](ctx)
@@ -47,7 +48,8 @@ func BenchmarkGetGeneratorWithDepenency(b *testing.B) {
 	})
 	dc := GetDependencyContext(ctx)
 	t := reflect.TypeOf(&testDoodad{})
-	s := dc.slots[t]
+	sa, _ := dc.slots.Load(t)
+	s := sa.(*slot)
 
 	for i := 0; i < b.N; i++ {
 		_ = Get[*testDoodad](ctx)
@@ -64,7 +66,8 @@ func BenchmarkGetGeneratorWithDepenencyAndContext(b *testing.B) {
 	})
 	dc := GetDependencyContext(ctx)
 	t := reflect.TypeOf(&testDoodad{})
-	s := dc.slots[t]
+	sa, _ := dc.slots.Load(t)
+	s := sa.(*slot)
 
 	for i := 0; i < b.N; i++ {
 		_ = Get[*testDoodad](ctx)
