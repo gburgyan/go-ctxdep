@@ -65,6 +65,15 @@ type Cache interface {
 // implement the Cache interface by calling the Redis commands.
 // Or you can use a library like Ristretto to implement the Cache
 // interface by simply wrapping it.
+//
+// Note that when caching things in a dependency context, you should
+// be aware that the result values are stored in the that context. The
+// cache is only saving the call to the generator function. Once the value
+// is in the dependency context, it will be there until that context is
+// no longer in use. That is the lifetime rules of the cache do not apply
+// to the values in the dependency context. The expectation is that the
+// lifetime of the dependency context is far shorter than the lifetime
+// of the cache.
 func Cached(cache Cache, generator any, ttl time.Duration) any {
 	genType := reflect.TypeOf(generator)
 	if genType.Kind() != reflect.Func {
