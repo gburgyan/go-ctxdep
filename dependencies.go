@@ -140,6 +140,10 @@ func (d *DependencyContext) addDependencies(deps []any, immediate *immediateDepe
 		} else {
 			d.parentFixed = true
 			depType := reflect.TypeOf(dep)
+			if depType == nil {
+				// This is a nil value, so we can't do anything with it.
+				continue
+			}
 			depKind := depType.Kind()
 
 			switch depKind {
