@@ -2,6 +2,8 @@ package ctxdep
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -19,8 +21,6 @@ type Keyable interface {
 	// the same.
 	CacheKey() string
 }
-
-var keyableType = reflect.TypeOf((*Keyable)(nil)).Elem()
 
 // Cache is an interface for a cache that can be used with the Cached() function.
 // The cache must be safe for concurrent use. The cache is not required to
@@ -203,10 +203,18 @@ func generatorParamKeys(args []reflect.Value) string {
 		if builder.Len() > 0 {
 			builder.WriteString(":")
 		}
-		if arg.CanConvert(keyableType) {
-			builder.WriteString(arg.Convert(keyableType).Interface().(Keyable).CacheKey())
+		val := arg.Interface()
+		if keyable, ok := val.(Keyable); ok {
+			builder.WriteString(keyable.CacheKey())
+		} else if stringer, ok := val.(fmt.Stringer); ok {
+			builder.WriteString(stringer.String())
 		} else {
-			builder.WriteString(arg.Type().Elem().Name())
+			valJson, err := json.Marshal(val)
+			if err != nil {
+				builder.WriteString(arg.Type().Elem().Name())
+			} else {
+				builder.Write(valJson)
+			}
 		}
 	}
 	return builder.String()

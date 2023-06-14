@@ -9,11 +9,15 @@ import (
 )
 
 type testWidget struct {
-	val int
+	Val int
 }
 
 type testDoodad struct {
-	val string
+	Val string
+}
+
+func (t testDoodad) String() string {
+	return t.Val
 }
 
 type testInterface interface {
@@ -29,38 +33,38 @@ func (t *testImpl) getVal() int {
 }
 
 func Test_SimpleObject(t *testing.T) {
-	ctx := NewDependencyContext(context.Background(), &testWidget{val: 42})
+	ctx := NewDependencyContext(context.Background(), &testWidget{Val: 42})
 
 	var widget *testWidget
 	GetBatch(ctx, &widget)
-	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, 42, widget.Val)
 
 	dc := GetDependencyContext(ctx)
 	widget = nil
 	dc.GetBatch(ctx, &widget)
-	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, 42, widget.Val)
 
 	assert.Equal(t, "*ctxdep.testWidget - direct value set", Status(ctx))
 }
 
 func Test_SimpleObjectGeneric(t *testing.T) {
-	ctx := NewDependencyContext(context.Background(), &testWidget{val: 42})
+	ctx := NewDependencyContext(context.Background(), &testWidget{Val: 42})
 
 	widget := Get[*testWidget](ctx)
-	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, 42, widget.Val)
 
 	assert.Equal(t, "*ctxdep.testWidget - direct value set", Status(ctx))
 }
 
 func Test_GeneratorAndObject(t *testing.T) {
 	ctx := NewDependencyContext(context.Background(), func() *testWidget {
-		return &testWidget{val: 42}
+		return &testWidget{Val: 42}
 	}, &testImpl{val: 105})
 
 	assert.Equal(t, "*ctxdep.testImpl - direct value set\n*ctxdep.testWidget - uninitialized - generator: () *ctxdep.testWidget", Status(ctx))
 
 	widget := Get[*testWidget](ctx)
-	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, 42, widget.Val)
 
 	var iface testInterface
 	GetBatch(ctx, &iface)
@@ -71,7 +75,7 @@ func Test_GeneratorAndObject(t *testing.T) {
 
 func Test_GeneratorAndObject_Slice(t *testing.T) {
 	depSlice := []any{func() *testWidget {
-		return &testWidget{val: 42}
+		return &testWidget{Val: 42}
 	}, &testImpl{val: 105}}
 
 	ctx := NewDependencyContext(context.Background(), depSlice)
@@ -79,7 +83,7 @@ func Test_GeneratorAndObject_Slice(t *testing.T) {
 	assert.Equal(t, "*ctxdep.testImpl - direct value set\n*ctxdep.testWidget - uninitialized - generator: () *ctxdep.testWidget", Status(ctx))
 
 	widget := Get[*testWidget](ctx)
-	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, 42, widget.Val)
 
 	var iface testInterface
 	GetBatch(ctx, &iface)
@@ -92,16 +96,16 @@ func Test_AddGenerator_MultiOutput(t *testing.T) {
 	calls := 0
 	creator := func(ctx context.Context) (*testWidget, *testDoodad) {
 		calls++
-		return &testWidget{val: 42}, &testDoodad{val: "new doodad"}
+		return &testWidget{Val: 42}, &testDoodad{Val: "new doodad"}
 	}
 
 	ctx := NewDependencyContext(context.Background(), creator)
 
 	doodad := Get[*testDoodad](ctx)
-	assert.Equal(t, "new doodad", doodad.val)
+	assert.Equal(t, "new doodad", doodad.Val)
 
 	widget := Get[*testWidget](ctx)
-	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, 42, widget.Val)
 
 	assert.Equal(t, 1, calls)
 }
@@ -126,7 +130,7 @@ func Test_Generator_MultipleRequests(t *testing.T) {
 	calls := 0
 	creator := func(ctx context.Context) (*testWidget, *testDoodad) {
 		calls++
-		return &testWidget{val: 42}, &testDoodad{val: "new doodad"}
+		return &testWidget{Val: 42}, &testDoodad{Val: "new doodad"}
 	}
 
 	ctx := NewDependencyContext(context.Background(), creator)
@@ -134,8 +138,8 @@ func Test_Generator_MultipleRequests(t *testing.T) {
 	var doodad *testDoodad
 	var widget *testWidget
 	GetBatch(ctx, &doodad, &widget)
-	assert.Equal(t, "new doodad", doodad.val)
-	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, "new doodad", doodad.Val)
+	assert.Equal(t, 42, widget.Val)
 
 	assert.Equal(t, 1, calls)
 }
@@ -165,7 +169,7 @@ func Test_GeneratorWithError_NoError(t *testing.T) {
 	calls := 0
 	creator := func(ctx context.Context) (*testWidget, *testDoodad, error) {
 		calls++
-		return &testWidget{val: 42}, &testDoodad{val: "myval"}, nil
+		return &testWidget{Val: 42}, &testDoodad{Val: "myval"}, nil
 	}
 
 	ctx := NewDependencyContext(context.Background(), creator)
@@ -173,8 +177,8 @@ func Test_GeneratorWithError_NoError(t *testing.T) {
 	var doodad *testDoodad
 	var widget *testWidget
 	GetBatch(ctx, &doodad, &widget)
-	assert.Equal(t, 42, widget.val)
-	assert.Equal(t, "myval", doodad.val)
+	assert.Equal(t, 42, widget.Val)
+	assert.Equal(t, "myval", doodad.Val)
 
 	assert.Equal(t, "*ctxdep.testDoodad - created from generator: (context.Context) *ctxdep.testWidget, *ctxdep.testDoodad, error\n*ctxdep.testWidget - created from generator: (context.Context) *ctxdep.testWidget, *ctxdep.testDoodad, error", Status(ctx))
 }
@@ -192,14 +196,14 @@ func Test_RelatedInterfaceGenerator(t *testing.T) {
 func Test_MultiLevelDependencies(t *testing.T) {
 	f1 := func(ctx context.Context) *testWidget {
 		return &testWidget{
-			val: 42,
+			Val: 42,
 		}
 	}
 
 	// Create another dependency context that is also on the context stack.
 	f2 := func(ctx context.Context, widget *testWidget) *testDoodad {
 		return &testDoodad{
-			val: fmt.Sprintf("%d", widget.val),
+			Val: fmt.Sprintf("%d", widget.Val),
 		}
 	}
 
@@ -207,21 +211,21 @@ func Test_MultiLevelDependencies(t *testing.T) {
 
 	doodad := Get[*testDoodad](ctx)
 
-	assert.Equal(t, "42", doodad.val)
+	assert.Equal(t, "42", doodad.Val)
 	assert.Equal(t, "*ctxdep.testDoodad - created from generator: (context.Context, *ctxdep.testWidget) *ctxdep.testDoodad\n*ctxdep.testWidget - created from generator: (context.Context) *ctxdep.testWidget", Status(ctx))
 }
 
 func Test_CyclicDependencies_FromParams(t *testing.T) {
 	f1 := func(ctx context.Context, doodad *testDoodad) *testWidget {
-		val, _ := strconv.Atoi(doodad.val)
+		val, _ := strconv.Atoi(doodad.Val)
 		return &testWidget{
-			val: val,
+			Val: val,
 		}
 	}
 
 	f2 := func(ctx context.Context, widget *testWidget) *testDoodad {
 		return &testDoodad{
-			val: fmt.Sprintf("%d", widget.val),
+			Val: fmt.Sprintf("%d", widget.Val),
 		}
 	}
 
@@ -240,9 +244,9 @@ func Test_CyclicDependencies_Implicit(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		val, _ := strconv.Atoi(doodad.val)
+		val, _ := strconv.Atoi(doodad.Val)
 		return &testWidget{
-			val: val,
+			Val: val,
 		}, nil
 	}
 
@@ -253,7 +257,7 @@ func Test_CyclicDependencies_Implicit(t *testing.T) {
 			return nil, err
 		}
 		return &testDoodad{
-			val: fmt.Sprintf("%d", widget.val),
+			Val: fmt.Sprintf("%d", widget.Val),
 		}, nil
 	}
 
@@ -270,25 +274,25 @@ func Test_CyclicDependencies_Implicit(t *testing.T) {
 }
 
 func Test_MultiLevelDependencies_Param(t *testing.T) {
-	c1 := NewDependencyContext(context.Background(), func() *testWidget { return &testWidget{val: 42} })
+	c1 := NewDependencyContext(context.Background(), func() *testWidget { return &testWidget{Val: 42} })
 
-	c2 := NewDependencyContext(c1, func(w *testWidget) *testDoodad { return &testDoodad{val: fmt.Sprintf("Doodad: %d", w.val)} })
+	c2 := NewDependencyContext(c1, func(w *testWidget) *testDoodad { return &testDoodad{Val: fmt.Sprintf("Doodad: %d", w.Val)} })
 
 	_ = Get[*testDoodad](c2)
 	doodad := Get[*testDoodad](c2) // Ensure that it was properly added to the child context.
 
-	assert.Equal(t, "Doodad: 42", doodad.val)
+	assert.Equal(t, "Doodad: 42", doodad.Val)
 	assert.Equal(t, "*ctxdep.testDoodad - created from generator: (*ctxdep.testWidget) *ctxdep.testDoodad\n*ctxdep.testWidget - imported from parent context\n----\nparent dependency context:\n*ctxdep.testWidget - created from generator: () *ctxdep.testWidget", Status(c2))
 }
 
 // While the intent is to store pointers to objects and not objects themselves to prevent copying,
 // verify that objects work as well.
 func Test_NonPointerDependencies(t *testing.T) {
-	ctx := NewDependencyContext(context.Background(), func() testWidget { return testWidget{val: 42} })
+	ctx := NewDependencyContext(context.Background(), func() testWidget { return testWidget{Val: 42} })
 
 	widget := Get[testWidget](ctx)
 
-	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, 42, widget.Val)
 	assert.Equal(t, "ctxdep.testWidget - created from generator: () ctxdep.testWidget", Status(ctx))
 }
 
@@ -321,7 +325,7 @@ func Test_GeneratorReturnNil(t *testing.T) {
 }
 
 func Test_UnknownDependencies(t *testing.T) {
-	ctx := NewDependencyContext(context.Background(), func() testWidget { return testWidget{val: 42} })
+	ctx := NewDependencyContext(context.Background(), func() testWidget { return testWidget{Val: 42} })
 
 	_, err := GetWithError[*testDoodad](ctx)
 	assert.Error(t, err)
@@ -344,7 +348,7 @@ func Test_AddNilDependency(t *testing.T) {
 }
 
 func Test_NonPointerGet(t *testing.T) {
-	ctx := NewDependencyContext(context.Background(), func() testWidget { return testWidget{val: 42} })
+	ctx := NewDependencyContext(context.Background(), func() testWidget { return testWidget{Val: 42} })
 
 	var doodad testDoodad
 	assert.PanicsWithValue(t, "target must be a pointer type: ctxdep.testDoodad", func() {
@@ -382,17 +386,17 @@ func Test_ComplicatedStatus(t *testing.T) {
 	c1 := NewDependencyContext(context.Background(), func() *testImpl {
 		return &testImpl{val: 42}
 	}, func() *testDoodad {
-		return &testDoodad{val: "wo0t"}
+		return &testDoodad{Val: "wo0t"}
 	})
 
 	// Make another status from that one
 	c2 := NewDependencyContext(c1, func(in testInterface) *testWidget {
-		return &testWidget{val: in.getVal()}
-	}, &testDoodad{val: "something cool"})
+		return &testWidget{Val: in.getVal()}
+	}, &testDoodad{Val: "something cool"})
 
 	widget := Get[*testWidget](c2)
 
-	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, 42, widget.Val)
 	expected := `*ctxdep.testDoodad - direct value set
 *ctxdep.testWidget - created from generator: (ctxdep.testInterface) *ctxdep.testWidget
 ctxdep.testInterface - imported from parent context
@@ -406,32 +410,32 @@ ctxdep.testInterface - assigned from *ctxdep.testImpl`
 
 func Test_LooseDependency_concrete(t *testing.T) {
 	widgetA := &testWidget{
-		val: 23,
+		Val: 23,
 	}
 	widgetB := &testWidget{
-		val: 42,
+		Val: 42,
 	}
 	assert.Panics(t, func() {
 		NewDependencyContext(context.Background(), widgetA, widgetB)
 	})
 	ctx := NewLooseDependencyContext(context.Background(), widgetA, widgetB)
 	widget := Get[*testWidget](ctx)
-	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, 42, widget.Val)
 }
 
 func Test_LooseDependency_generator(t *testing.T) {
 	genA := func() *testWidget {
 		return &testWidget{
-			val: 23,
+			Val: 23,
 		}
 	}
 	genB := func() *testWidget {
 		return &testWidget{
-			val: 42,
+			Val: 42,
 		}
 	}
 	widgetC := &testWidget{
-		val: 105,
+		Val: 105,
 	}
 	assert.Panics(t, func() {
 		NewDependencyContext(context.Background(), genA, widgetC)
@@ -439,39 +443,39 @@ func Test_LooseDependency_generator(t *testing.T) {
 
 	ctx := NewLooseDependencyContext(context.Background(), genA, widgetC)
 	widget := Get[*testWidget](ctx)
-	assert.Equal(t, 105, widget.val)
+	assert.Equal(t, 105, widget.Val)
 
 	ctx = NewLooseDependencyContext(context.Background(), genA, genB)
 	widget = Get[*testWidget](ctx)
-	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, 42, widget.Val)
 
 	ctx = NewLooseDependencyContext(context.Background(), widgetC, genA)
 	widget = Get[*testWidget](ctx)
-	assert.Equal(t, 105, widget.val)
+	assert.Equal(t, 105, widget.Val)
 }
 
 func Test_ParentContextOverride(t *testing.T) {
 	widget := &testWidget{
-		val: 23,
+		Val: 23,
 	}
 	rootCtx := NewDependencyContext(context.Background(), widget)
 
-	ctx := NewDependencyContext(context.Background(), rootCtx, &testDoodad{val: "wo0t"})
+	ctx := NewDependencyContext(context.Background(), rootCtx, &testDoodad{Val: "wo0t"})
 
 	ctxWidget := Get[*testWidget](ctx)
-	assert.Equal(t, 23, ctxWidget.val)
+	assert.Equal(t, 23, ctxWidget.Val)
 
 	doodad := Get[*testDoodad](ctx)
-	assert.Equal(t, "wo0t", doodad.val)
+	assert.Equal(t, "wo0t", doodad.Val)
 }
 
 func Test_ParentContextOverride_error(t *testing.T) {
 	widget := &testWidget{
-		val: 23,
+		Val: 23,
 	}
 	rootCtx := NewDependencyContext(context.Background(), widget)
 
 	assert.PanicsWithValue(t, "cannot override parent context", func() {
-		NewDependencyContext(context.Background(), &testDoodad{val: "wo0t"}, rootCtx)
+		NewDependencyContext(context.Background(), &testDoodad{Val: "wo0t"}, rootCtx)
 	})
 }

@@ -98,7 +98,7 @@ func Test_CacheComplex(t *testing.T) {
 	callCount := 0
 	generator := func(key1 *inputValue, key2 *inputValue2) (*outputValue, *testDoodad, error) {
 		callCount++
-		return &outputValue{Value: key1.Value}, &testDoodad{val: key2.Value}, nil
+		return &outputValue{Value: key1.Value}, &testDoodad{Val: key2.Value}, nil
 	}
 
 	input := &inputValue{Value: "1"}
@@ -115,9 +115,9 @@ func Test_CacheComplex(t *testing.T) {
 	assert.Contains(t, cache.values, "1:2//outputValue:testDoodad")
 	assert.Equal(t, 1, callCount)
 	assert.Equal(t, "1", r1a.Value)
-	assert.Equal(t, "2", r1b.val)
+	assert.Equal(t, "2", r1b.Val)
 	assert.Equal(t, "1", r2a.Value)
-	assert.Equal(t, "2", r2b.val)
+	assert.Equal(t, "2", r2b.Val)
 	assert.Equal(t, 1, cache.lockCount)
 	assert.Equal(t, 1, cache.unlockCount)
 }
@@ -184,17 +184,57 @@ func Test_Cache_NonFunction(t *testing.T) {
 	})
 }
 
-func Test_Cache_NonKeyed(t *testing.T) {
+func Test_Cache_NonKeyed_JSON(t *testing.T) {
 	cache := DumbCache{
 		values: make(map[string][]any),
 	}
 
 	generator := func(ctx context.Context, widget *testWidget) (*outputValue, error) {
-		return &outputValue{Value: strconv.Itoa(widget.val)}, nil
+		return &outputValue{Value: strconv.Itoa(widget.Val)}, nil
 	}
 
-	ctx := NewDependencyContext(context.Background(), &testWidget{val: 42}, Cached(&cache, generator, time.Minute))
+	ctx := NewDependencyContext(context.Background(), &testWidget{Val: 42}, Cached(&cache, generator, time.Minute))
 	ov := Get[*outputValue](ctx)
-	assert.Contains(t, cache.values, "testWidget//outputValue")
+	assert.Contains(t, cache.values, "{\"Val\":42}//outputValue")
+	assert.Equal(t, "42", ov.Value)
+}
+
+func Test_Cache_NonKeyed_Stringer(t *testing.T) {
+	cache := DumbCache{
+		values: make(map[string][]any),
+	}
+
+	generator := func(ctx context.Context, doodad *testDoodad) (*outputValue, error) {
+		return &outputValue{Value: doodad.Val}, nil
+	}
+
+	ctx := NewDependencyContext(context.Background(), &testDoodad{Val: "42"}, Cached(&cache, generator, time.Minute))
+	ov := Get[*outputValue](ctx)
+	assert.Contains(t, cache.values, "42//outputValue")
+	assert.Equal(t, "42", ov.Value)
+}
+
+func Test_Cache_NonKeyed_BadJSON(t *testing.T) {
+	cache := DumbCache{
+		values: make(map[string][]any),
+	}
+
+	type recursive struct {
+		Val  string
+		Next *recursive
+	}
+
+	generator := func(ctx context.Context, recursive *recursive) (*outputValue, error) {
+		return &outputValue{Value: recursive.Val}, nil
+	}
+
+	input := &recursive{
+		Val: "42",
+	}
+	input.Next = input // Purposefully create a recursive structure that can't be marshalled to JSON.
+
+	ctx := NewDependencyContext(context.Background(), input, Cached(&cache, generator, time.Minute))
+	ov := Get[*outputValue](ctx)
+	assert.Contains(t, cache.values, "recursive//outputValue")
 	assert.Equal(t, "42", ov.Value)
 }

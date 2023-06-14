@@ -12,7 +12,7 @@ func Test_ImmediateDependency(t *testing.T) {
 	callCount := 0
 	f := func() *testWidget {
 		callCount++
-		return &testWidget{val: 42}
+		return &testWidget{Val: 42}
 	}
 
 	assert.Equal(t, 0, callCount)
@@ -27,7 +27,7 @@ func Test_ImmediateDependency(t *testing.T) {
 	var widget *testWidget
 	GetBatch(ctx, &widget)
 
-	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, 42, widget.Val)
 	assert.Equal(t, 1, callCount)
 }
 
@@ -36,7 +36,7 @@ func Test_ImmediateDependency_LongCall(t *testing.T) {
 	f := func() *testWidget {
 		callCount++
 		time.Sleep(100 * time.Millisecond)
-		return &testWidget{val: 42}
+		return &testWidget{Val: 42}
 	}
 
 	assert.Equal(t, 0, callCount)
@@ -54,7 +54,7 @@ func Test_ImmediateDependency_LongCall(t *testing.T) {
 
 	d := time.Since(start)
 
-	assert.Equal(t, 42, widget.val)
+	assert.Equal(t, 42, widget.Val)
 	assert.Equal(t, 1, callCount)
 	assert.InEpsilon(t, 50*time.Millisecond, d, .1)
 }
