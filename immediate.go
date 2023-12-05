@@ -33,6 +33,17 @@ func (d *DependencyContext) resolveImmediateDependencies(ctx context.Context) {
 		slot := sa.(*slot)
 		if slot.immediate != nil {
 			go func() {
+				defer func() {
+					// Catch panics
+					if r := recover(); r != nil {
+						// The best we can do is ignore this for now since we're
+						// inside nested goroutines and the original call has returned.
+						// By ignoring this error now, the dependency remains unset
+						// and the call to fetch it will retry the call and either
+						// succeed or (likely) fail again. The new failure will at
+						// least be in a better place to report this though.
+					}
+				}()
 				target := reflect.New(slot.slotType)
 				err := d.getValue(ctx, slot, slot.slotType, target.Interface())
 				if err != nil {

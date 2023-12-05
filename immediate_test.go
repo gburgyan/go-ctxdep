@@ -83,3 +83,28 @@ func Test_ImmediateDependency_Error(t *testing.T) {
 	assert.Nil(t, widget)
 	assert.Equal(t, 2, callCount)
 }
+
+func Test_ImmediateDependency_Panic(t *testing.T) {
+	callCount := 0
+	f := func() (*testWidget, error) {
+		callCount++
+		panic("expected panic")
+	}
+
+	assert.Equal(t, 0, callCount)
+
+	ctx := NewDependencyContext(context.Background(), Immediate(f))
+
+	// Wait a bit to ensure the goroutine completes.
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(t, 1, callCount)
+
+	var widget *testWidget
+	assert.Panics(t, func() {
+		GetBatch(ctx, &widget)
+	})
+
+	assert.Nil(t, widget)
+	assert.Equal(t, 2, callCount)
+}
