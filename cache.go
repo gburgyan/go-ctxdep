@@ -22,6 +22,17 @@ type Keyable interface {
 	CacheKey() string
 }
 
+var cacheKeyProviders = make(map[reflect.Type]func(any) string)
+
+// RegisterCacheKeyProvider registers a function that can be used to
+// generate a cache key for a given type. This is used by the Cached()
+// function to generate a cache key for the given dependency. This
+// allows for the cache key to be generated for types that do not
+// implement the Keyable interface.
+func RegisterCacheKeyProvider(t reflect.Type, f func(any) string) {
+	cacheKeyProviders[t] = f
+}
+
 // Cache is an interface for a cache that can be used with the Cached() function.
 // The cache must be safe for concurrent use. The cache is not required to
 // support locking, but if it does not support locking then the generator
@@ -206,6 +217,8 @@ func generatorParamKeys(args []reflect.Value) string {
 		val := arg.Interface()
 		if keyable, ok := val.(Keyable); ok {
 			builder.WriteString(keyable.CacheKey())
+		} else if provider, ok := cacheKeyProviders[arg.Type()]; ok {
+			builder.WriteString(provider(val))
 		} else if stringer, ok := val.(fmt.Stringer); ok {
 			builder.WriteString(stringer.String())
 		} else {

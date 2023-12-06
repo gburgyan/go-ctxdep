@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/stretchr/testify/assert"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -236,5 +237,25 @@ func Test_Cache_NonKeyed_BadJSON(t *testing.T) {
 	ctx := NewDependencyContext(context.Background(), input, Cached(&cache, generator, time.Minute))
 	ov := Get[*outputValue](ctx)
 	assert.Contains(t, cache.values, "recursive//outputValue")
+	assert.Equal(t, "42", ov.Value)
+}
+
+func Test_Cache_NonKeyed_CustomKey(t *testing.T) {
+	cache := DumbCache{
+		values: make(map[string][]any),
+	}
+
+	generator := func(ctx context.Context, widget *testWidget) (*outputValue, error) {
+		return &outputValue{Value: strconv.Itoa(widget.Val)}, nil
+	}
+
+	RegisterCacheKeyProvider(reflect.TypeOf(&testWidget{}), func(any any) string {
+		widget := any.(*testWidget)
+		return fmt.Sprintf("custom:%d", widget.Val)
+	})
+
+	ctx := NewDependencyContext(context.Background(), &testWidget{Val: 42}, Cached(&cache, generator, time.Minute))
+	ov := Get[*outputValue](ctx)
+	assert.Contains(t, cache.values, "custom:42//outputValue")
 	assert.Equal(t, "42", ov.Value)
 }

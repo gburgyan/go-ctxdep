@@ -268,7 +268,15 @@ type Cache interface {
 }
 ```
 
-The expectation is that this interface can wrap whatever caching system you want to use. Lock is used to ensure that only one goroutine is generating the value for a key at a time, however the implementation of that is not required -- you can simply return a no-op function or nil and things will function as expected. 
+The expectation is that this interface can wrap whatever caching system you want to use. Lock is used to ensure that only one goroutine is generating the value for a key at a time, however the implementation of that is not required -- you can simply return a no-op function or nil and things will function as expected.
+
+## Cache key generation
+
+The simplest way is to implement the `Keyable` interface as described above. If, for whatever reason, you can't implement that interface, there are several fallback options that are also attempted:
+
+* You can call `ctxdep.RegisterCacheKeyProvider` with a custom function that will be called that generates the cache key.
+* If the type implements the `Stringer` interface, that will be used to generate the cache key.
+* The object is serialized using the default JSON serializer, and the result of that is used as the key.
 
 # Why all this is important
 
