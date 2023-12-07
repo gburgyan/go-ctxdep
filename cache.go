@@ -223,7 +223,7 @@ func generatorParamKeys(args []reflect.Value) string {
 			builder.WriteString(stringer.String())
 		} else {
 			valJson, err := json.Marshal(val)
-			if err != nil {
+			if err != nil || string(valJson) == "{}" {
 				builder.WriteString(arg.Type().Elem().Name())
 			} else {
 				builder.Write(valJson)

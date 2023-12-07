@@ -200,6 +200,24 @@ func Test_Cache_NonKeyed_JSON(t *testing.T) {
 	assert.Equal(t, "42", ov.Value)
 }
 
+func Test_Cache_NonKeyed_EmptyJSON(t *testing.T) {
+	cache := DumbCache{
+		values: make(map[string][]any),
+	}
+
+	type empty struct {
+	}
+
+	generator := func(ctx context.Context, e *empty) (*testWidget, error) {
+		return &testWidget{Val: 42}, nil
+	}
+
+	ctx := NewDependencyContext(context.Background(), &empty{}, Cached(&cache, generator, time.Minute))
+	ov := Get[*testWidget](ctx)
+	assert.Contains(t, cache.values, "empty//testWidget")
+	assert.NotNil(t, ov)
+}
+
 func Test_Cache_NonKeyed_Stringer(t *testing.T) {
 	cache := DumbCache{
 		values: make(map[string][]any),
