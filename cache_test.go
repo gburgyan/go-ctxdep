@@ -34,6 +34,7 @@ type DumbCache struct {
 	values      map[string][]any
 	lockCount   int
 	unlockCount int
+	lastTtl     time.Duration
 }
 
 func (d *DumbCache) Get(ctx context.Context, key string) []any {
@@ -52,6 +53,7 @@ func (d *DumbCache) SetTTL(ctx context.Context, key string, value []any, ttl tim
 		panic("ctx is nil")
 	}
 	d.values[key] = value
+	d.lastTtl = ttl
 }
 
 func (d *DumbCache) Lock(ctx context.Context, key string) func() {
@@ -89,6 +91,41 @@ func Test_Cache(t *testing.T) {
 	assert.Equal(t, "1", r2.Value)
 	assert.Equal(t, 1, cache.lockCount)
 	assert.Equal(t, 1, cache.unlockCount)
+}
+
+func Test_CacheCustom(t *testing.T) {
+	cache := DumbCache{
+		values: make(map[string][]any),
+	}
+
+	callCount := 0
+	generator := func(ctx context.Context, key *inputValue) (*outputValue, error) {
+		callCount++
+		return &outputValue{Value: key.Value}, nil
+	}
+
+	input := &inputValue{Value: "42"}
+	var retDuration time.Duration
+
+	ttlProvider := func(anies []any) time.Duration {
+		outVal := anies[0].(*outputValue)
+		// Convert the output value to an int, and use that as the TTL in minutes.
+		i, err := strconv.Atoi(outVal.Value)
+		if err != nil {
+			return time.Minute
+		}
+		retDuration = time.Duration(i) * time.Minute
+		return retDuration
+	}
+
+	ctx1 := NewDependencyContext(context.Background(), input, CachedCustom(&cache, generator, ttlProvider))
+	r1 := Get[*outputValue](ctx1)
+
+	assert.Contains(t, cache.values, "42//outputValue")
+	assert.Equal(t, 1, callCount)
+	assert.Equal(t, "42", r1.Value)
+
+	assert.Equal(t, time.Minute*42, retDuration)
 }
 
 func Test_CacheComplex(t *testing.T) {
@@ -276,4 +313,37 @@ func Test_Cache_NonKeyed_CustomKey(t *testing.T) {
 	ov := Get[*outputValue](ctx)
 	assert.Contains(t, cache.values, "custom:42//outputValue")
 	assert.Equal(t, "42", ov.Value)
+}
+
+type testCacheTTL struct {
+	minutes int
+}
+
+func (t *testCacheTTL) CacheTTL() time.Duration {
+	return time.Duration(t.minutes) * time.Minute
+}
+
+func Test_Cache_ObjectTTL(t *testing.T) {
+	cache := DumbCache{
+		values: make(map[string][]any),
+	}
+
+	generator := func(ctx context.Context, key *inputValue) (*testCacheTTL, error) {
+		i, err := strconv.Atoi(key.Value)
+		if err != nil {
+			return nil, err
+		}
+
+		return &testCacheTTL{minutes: i}, nil
+	}
+
+	input := &inputValue{Value: "42"}
+
+	ctx1 := NewDependencyContext(context.Background(), input, Cached(&cache, generator, time.Hour))
+	r1 := Get[*testCacheTTL](ctx1)
+
+	assert.Contains(t, cache.values, "42//testCacheTTL")
+	assert.Equal(t, 42, r1.minutes)
+
+	assert.Equal(t, time.Minute*42, cache.lastTtl)
 }
