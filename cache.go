@@ -120,8 +120,17 @@ type CacheTTL interface {
 // implement the CacheTTL interface, the TTL parameter will be used
 // as the TTL for the cache entry.
 func Cached(cache Cache, generator any, ttl time.Duration) any {
-	return CachedCustom(cache, generator, func([]any) time.Duration {
-		return ttl
+	return CachedCustom(cache, generator, func(rets []any) time.Duration {
+		lowestTtl := ttl
+		for _, retObj := range rets {
+			if cacheTTL, ok := retObj.(CacheTTL); ok {
+				objectTTL := cacheTTL.CacheTTL()
+				if objectTTL < lowestTtl {
+					lowestTtl = objectTTL
+				}
+			}
+		}
+		return lowestTtl
 	})
 }
 
@@ -243,7 +252,6 @@ func CachedCustom(cache Cache, generator any, durationProvider CacheDurationProv
 		results := baseGenerator.Call(funcArgs)
 
 		cacheVals := make([]any, 0)
-		resultTTL := time.Hour * 24 * 365 * 100 // 100 years
 
 		// Verify that the results are valid.
 		for _, result := range results {
@@ -257,22 +265,11 @@ func CachedCustom(cache Cache, generator any, durationProvider CacheDurationProv
 				// If the result is nil, don't cache the result
 				return results
 			}
-			resultVal := result.Interface()
-			if cacheTTL, ok := resultVal.(CacheTTL); ok {
-				objectTTL := cacheTTL.CacheTTL()
-				if objectTTL < resultTTL {
-					resultTTL = objectTTL
-				}
-			}
-			cacheVals = append(cacheVals, resultVal)
+
+			cacheVals = append(cacheVals, result.Interface())
 		}
 
 		ttl := durationProvider(cacheVals)
-
-		// Use the minimum between the TTL from the duration provider and the TTL from the result.
-		if resultTTL < ttl {
-			ttl = resultTTL
-		}
 
 		cache.SetTTL(ctx, cacheKey, cacheVals, ttl)
 		return results
