@@ -271,7 +271,10 @@ func CachedCustom(cache Cache, generator any, durationProvider CacheDurationProv
 
 		ttl := durationProvider(cacheVals)
 
-		cache.SetTTL(ctx, cacheKey, cacheVals, ttl)
+		if ttl > 0 {
+			cache.SetTTL(ctx, cacheKey, cacheVals, ttl)
+		}
+
 		return results
 	}).Interface()
 }

@@ -347,3 +347,26 @@ func Test_Cache_ObjectTTL(t *testing.T) {
 
 	assert.Equal(t, time.Minute*42, cache.lastTtl)
 }
+
+func Test_Cache_ObjectTTL_Zero(t *testing.T) {
+	cache := DumbCache{
+		values: make(map[string][]any),
+	}
+
+	generator := func(ctx context.Context, key *inputValue) (*testCacheTTL, error) {
+		i, err := strconv.Atoi(key.Value)
+		if err != nil {
+			return nil, err
+		}
+
+		return &testCacheTTL{minutes: i}, nil
+	}
+
+	input := &inputValue{Value: "0"}
+
+	ctx1 := NewDependencyContext(context.Background(), input, Cached(&cache, generator, time.Hour))
+	r1 := Get[*testCacheTTL](ctx1)
+
+	assert.Empty(t, cache.values)
+	assert.Equal(t, 0, r1.minutes)
+}
