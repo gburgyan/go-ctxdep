@@ -2,6 +2,7 @@ package ctxdep
 
 import (
 	"context"
+	"log"
 	"reflect"
 )
 
@@ -42,6 +43,7 @@ func (d *DependencyContext) resolveImmediateDependencies(ctx context.Context) {
 						// and the call to fetch it will retry the call and either
 						// succeed or (likely) fail again. The new failure will at
 						// least be in a better place to report this though.
+						log.Printf("panic resolving immediate dependency for %v: %v", slot.slotType, r)
 					}
 				}()
 				target := reflect.New(slot.slotType)
@@ -53,6 +55,7 @@ func (d *DependencyContext) resolveImmediateDependencies(ctx context.Context) {
 					// and the call to fetch it will retry the call and either
 					// succeed or (likely) fail again. The new failure will at
 					// least be in a better place to report this though.
+					log.Printf("error resolving immediate: %v", err)
 				}
 			}()
 		}
