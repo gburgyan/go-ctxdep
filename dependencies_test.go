@@ -3,6 +3,7 @@ package ctxdep
 import (
 	"context"
 	"fmt"
+	"github.com/gburgyan/go-timing"
 	"github.com/stretchr/testify/assert"
 	"strconv"
 	"testing"
@@ -207,12 +208,16 @@ func Test_MultiLevelDependencies(t *testing.T) {
 		}
 	}
 
-	ctx := NewDependencyContext(context.Background(), f1, f2)
+	EnableTiming = TimingGenerators
+	timingCtx := timing.Root(context.Background())
+	ctx := NewDependencyContext(timingCtx, f1, f2)
 
 	doodad := Get[*testDoodad](ctx)
 
 	assert.Equal(t, "42", doodad.Val)
 	assert.Equal(t, "*ctxdep.testDoodad - created from generator: (context.Context, *ctxdep.testWidget) *ctxdep.testDoodad\n*ctxdep.testWidget - created from generator: (context.Context) *ctxdep.testWidget", Status(ctx))
+
+	fmt.Println(timingCtx.String())
 }
 
 func Test_CyclicDependencies_FromParams(t *testing.T) {

@@ -492,3 +492,41 @@ Any generators that are run will run from the context from which they were creat
 This is an important security feature. If a child dependency could fill a requirement for a parent's generator, data from one part of the code could pollute elsewhere because the results of the generators are saved for later use. This can also be a potential security vulnerability where the wrong data could potentially be used.
 
 There is special handling of the caller's context such that the deadlines and everything that comes from the context are still honored. If the caller's context times out, then a generator that respects the timeouts will properly abort. The result of that error is not cached.
+
+## Timing
+
+There is the ability for the context dependencies to use the sister library, `go-timing`, to keep track of the execution time during runtime. Please refer to the [documentation for that library](https://github.com/gburgyan/go-timing) for full details on its usage.
+
+By default, this integration is disabled as there is a very minor performance penalty (generally well under a microsecond per generator invocation).
+
+This can be enabled by setting `ctxdep.TimingMode`:
+
+* `TimingDisable` - the default off state.
+* `TimingImmediate` - create a placeholder timing context for the immediate dependency processing.
+* `TimingGenerators` - in addition to creating a context for the immediate processing, will also create a timing context whenever a generator is going to be invoked.
+
+For generators, this also has the ability to note when a generator was waiting for another goroutine to finish the generator.
+
+For instance, the test `Test_ImmediateDependency_LongCall` will show something like this:
+
+```text
+[ImmediateDeps] > CtxDep(gen() *ctxdep.testWidget) - 101.132625ms
+CtxDep(gen() *ctxdep.testWidget) - 50.236666ms (wait:parallel)
+```
+
+This indicates that the immediate generator for the `*testWidget` took roughly 100ms to execute. In the test code, there is a call to fetch the same dependency delayed by 50ms. This will block until the completion of the call by the generator. In this case, the main goroutine was blocked by the same generator that was previously started by the immediate processing. Since this is still time that is being consumed, even though it's simply a wait, this will be noted by the additional detail of "wait:parallel" in the timing context.
+
+The `[ImmediateDeps]` is configured as an async timing context with no time allotted to itself so it will not affect the overall timings.
+
+An example of the `TimingGenerators` can be found in the `Test_MultiLevelDependencies` test. The output of this looks like:
+
+```text
+CtxDep(gen(context.Context, *ctxdep.testWidget) *ctxdep.testDoodad) - 82.583µs
+CtxDep(gen(context.Context, *ctxdep.testWidget) *ctxdep.testDoodad) > CtxDep(gen(context.Context) *ctxdep.testWidget) - 52.416µs
+```
+
+In this case, this is showing that the call to get the `*testDoodad` invoked a generator `gen(context.Context, *ctxdep.testWidget) *ctxdep.testDoodad`, which needed the `*testWidget`, which invoked another generator.
+
+This level of detail may or may not be helpful, but it does add a lot of extra information to the timing that is being gathered which can be useful if you are completely stumped how things are working or time is being spent.
+
+What may be more useful generally is to use `TimingImmediate` and handle any known long calls with your own timing calls.

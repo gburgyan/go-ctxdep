@@ -17,8 +17,8 @@ func Test_secureContext(t *testing.T) {
 	valCtx2 := context.WithValue(cycleCtx, "ctx2", "val2")
 
 	secCtx := &secureContext{
-		baseContext:  valCtx1,
-		innerContext: valCtx2,
+		baseContext:   valCtx1,
+		timingContext: valCtx2,
 	}
 
 	assert.NotNil(t, secCtx.Value("ctx1"))

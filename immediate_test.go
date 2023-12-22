@@ -3,6 +3,7 @@ package ctxdep
 import (
 	"context"
 	"fmt"
+	"github.com/gburgyan/go-timing"
 	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
@@ -41,7 +42,10 @@ func Test_ImmediateDependency_LongCall(t *testing.T) {
 
 	assert.Equal(t, 0, callCount)
 
-	ctx := NewDependencyContext(context.Background(), Immediate(f))
+	EnableTiming = TimingGenerators
+	timingCtx := timing.Root(context.Background())
+
+	ctx := NewDependencyContext(timingCtx, Immediate(f))
 
 	// Delay the start of the real request by 50ms. The immediate call should have locked
 	// the slot while it's computing the value (100ms) so _this_ call should take another
@@ -57,6 +61,8 @@ func Test_ImmediateDependency_LongCall(t *testing.T) {
 	assert.Equal(t, 42, widget.Val)
 	assert.Equal(t, 1, callCount)
 	assert.InEpsilon(t, 50*time.Millisecond, d, .1)
+
+	fmt.Println(timingCtx.String())
 }
 
 func Test_ImmediateDependency_Error(t *testing.T) {

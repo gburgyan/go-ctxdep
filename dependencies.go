@@ -3,6 +3,7 @@ package ctxdep
 import (
 	"context"
 	"fmt"
+	"github.com/gburgyan/go-timing"
 	"reflect"
 	"sync"
 )
@@ -310,6 +311,13 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 		return nil
 	}
 
+	var timingCtx *timing.Context
+	if EnableTiming >= TimingGenerators {
+		var complete timing.Complete
+		timingCtx, complete = timing.Start(ctx, "CtxDep(gen"+formatGeneratorDebug(activeSlot.generator)+")")
+		defer complete()
+		ctx = timingCtx
+	}
 	// Before locking this slot, ensure that we're not in a cyclic dependency. If we are,
 	// return an error. Otherwise, the lock call would deadlock.
 	cycleCtx, unlocker, err := d.enterSlotProcessing(ctx, activeSlot)
@@ -334,6 +342,9 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 	if activeSlot.value != nil {
 		slotVal := reflect.ValueOf(activeSlot.value)
 		targetVal.Elem().Set(slotVal)
+		if timingCtx != nil {
+			timingCtx.AddDetails("wait", "parallel")
+		}
 		return nil
 	}
 

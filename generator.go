@@ -80,8 +80,8 @@ func (d *DependencyContext) invokeSlotGenerator(ctx context.Context, activeSlot 
 		sc = prevSc
 	} else {
 		sc = &secureContext{
-			baseContext:  d.selfContext,
-			innerContext: ctx,
+			baseContext:   d.selfContext,
+			timingContext: ctx,
 		}
 	}
 

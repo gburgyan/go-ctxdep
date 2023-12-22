@@ -5,6 +5,24 @@ import (
 	"sync"
 )
 
+type TimingMode int
+
+const (
+	// TimingDisable will disable timing for all contexts.
+	TimingDisable TimingMode = iota
+
+	// TimingImmediate will start a new placeholder context for actions that are taken
+	// during the immediate dependency resolution phase (if any).
+	TimingImmediate
+
+	// TimingGenerators will start timing context for each generator that is called. This is useful
+	// to see where all time of execution is being spent. It can also be helpful to see the exact stack
+	// for the dependency resolution.
+	TimingGenerators
+)
+
+var EnableTiming = TimingDisable
+
 // NewDependencyContext adds a new dependency context to the context stack and returns
 // the new context. It also adds any dependencies that are also passed in to the new
 // dependency context. For a further discussion on what dependencies do and how
