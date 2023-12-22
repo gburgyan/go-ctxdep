@@ -314,7 +314,9 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 	var timingCtx *timing.Context
 	if EnableTiming >= TimingGenerators {
 		var complete timing.Complete
-		timingCtx, complete = timing.Start(ctx, "CtxDep(gen"+formatGeneratorDebug(activeSlot.generator)+")")
+		name := fmt.Sprintf("CtxGen(%v)", targetType)
+		timingCtx, complete = timing.Start(ctx, name)
+		timingCtx.AddDetails("generator", formatGeneratorDebug(activeSlot.generator))
 		defer complete()
 		ctx = timingCtx
 	}

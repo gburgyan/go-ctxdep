@@ -510,8 +510,8 @@ For generators, this also has the ability to note when a generator was waiting f
 For instance, the test `Test_ImmediateDependency_LongCall` will show something like this:
 
 ```text
-[ImmediateDeps] > CtxDep(gen() *ctxdep.testWidget) - 101.132625ms
-CtxDep(gen() *ctxdep.testWidget) - 50.236666ms (wait:parallel)
+[ImmediateDeps] > CtxGen(*ctxdep.testWidget) - 101.05975ms (generator:() *ctxdep.testWidget)
+CtxGen(*ctxdep.testWidget) - 49.9845ms (generator:() *ctxdep.testWidget, wait:parallel)
 ```
 
 This indicates that the immediate generator for the `*testWidget` took roughly 100ms to execute. In the test code, there is a call to fetch the same dependency delayed by 50ms. This will block until the completion of the call by the generator. In this case, the main goroutine was blocked by the same generator that was previously started by the immediate processing. Since this is still time that is being consumed, even though it's simply a wait, this will be noted by the additional detail of "wait:parallel" in the timing context.
@@ -521,11 +521,11 @@ The `[ImmediateDeps]` is configured as an async timing context with no time allo
 An example of the `TimingGenerators` can be found in the `Test_MultiLevelDependencies` test. The output of this looks like:
 
 ```text
-CtxDep(gen(context.Context, *ctxdep.testWidget) *ctxdep.testDoodad) - 82.583µs
-CtxDep(gen(context.Context, *ctxdep.testWidget) *ctxdep.testDoodad) > CtxDep(gen(context.Context) *ctxdep.testWidget) - 52.416µs
+CtxGen(*ctxdep.testDoodad) - 30.083µs (generator:(context.Context, *ctxdep.testWidget) *ctxdep.testDoodad)
+CtxGen(*ctxdep.testDoodad) > CtxGen(*ctxdep.testWidget) - 3.084µs (generator:(context.Context) *ctxdep.testWidget)
 ```
 
-In this case, this is showing that the call to get the `*testDoodad` invoked a generator `gen(context.Context, *ctxdep.testWidget) *ctxdep.testDoodad`, which needed the `*testWidget`, which invoked another generator.
+In this case, this is showing that the call to get the `*testDoodad` invoked a generator `gen(context.Context, *ctxdep.testWidget) *ctxdep.testDoodad`, which needed the `*testWidget`, which invoked another generator. The names of the timing contexts are that of the requested type that prompted the generator call. The actual signature of the generator is added as additional details for the timing context. If a generator produces multiple outputs, only the first call to the context dependencies gets explicit timing logging as the generator is only invoked once.
 
 This level of detail may or may not be helpful, but it does add a lot of extra information to the timing that is being gathered which can be useful if you are completely stumped how things are working or time is being spent.
 
