@@ -62,7 +62,7 @@ This works very similarly to how the base `context.WithValue()` system works: yo
 
 A key point is that the client code above *never* changes in how it works. Fundamental to the design is that you always ask for an object out of the context, and you receive it--it doesn't matter how that object got into the context, it just works. There are a couple of ways of doing this operation, but it is always the same in concept.
 
-## Slices
+## Slices of inputs
 
 A slice of values can be passed in to the dependencies. If a `[]any` is passed, those are flattened and evaluated as if they weren't in a sub-slice. This is to support a use case where several components return `[]any` for their dependencies. This is simply a helper to prevent having to manually concatenate slices before passing them to `NewDependencyContext`.
 
@@ -371,7 +371,7 @@ Even if you never use the generators, this is a key advantage to unit testing yo
 
 While processing a generator, that generator can request an additional object from the dependency context. This can happen either through parameters that are passed to the generator directly or through requesting them explicitly from the dependency context. There are provisions in the library to check for circular dependencies. In case such a circular dependency is encountered, an error is returned.
 
-If this check were not included then a circular dependency would lead to a deadlock due to the checks that ensure thread safety.
+If this check were not included, then a circular dependency would lead to a deadlock due to the checks that ensure thread safety.
 
 ## Thread safety
 
@@ -483,7 +483,7 @@ When constructing a context "loosely," you can freely override concrete values a
 
 ## Overriding the parent context
 
-In certain cases you need to reuse a parent context because whatever created the context you have did not properly copy the context. We've encountered this with gRPC services having a parent context of `context.Background()`. If you pass a context as the first dependency parameter when you `NewDependencyContext`, you can override where parent dependencies are looked up. Note that this only works when you pass the context as the first parameter to `NewDependencyContext`.
+In certain cases you need to reuse a parent context because whatever created the context you have did not properly copy the context. We've encountered this with gRPC services having a parent context of `context.Background()` on goroutines that are created to service requests. If you pass a context as the first dependency parameter when you `NewDependencyContext`, you can override where parent dependencies are looked up. Note that this only works when you pass the context as the first real parameter to `NewDependencyContext`. This works even if the first real parameter is inside a slice that has been passed in at initialization.
 
 ## Special handling of contexts
 
