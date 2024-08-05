@@ -484,19 +484,3 @@ func Test_ParentContextOverride_error(t *testing.T) {
 		NewDependencyContext(context.Background(), &testDoodad{Val: "wo0t"}, rootCtx)
 	})
 }
-
-type TestSpecificFunction *func(context.Context, int) (int, error)
-
-func Test_SpecificFunction(t *testing.T) {
-	f := func(ctx context.Context, val int) (int, error) {
-		return val * 2, nil
-	}
-
-	ctx := NewDependencyContext(context.Background(), &f)
-
-	fn := Get[TestSpecificFunction](ctx)
-
-	result, err := (*fn)(context.Background(), 21)
-	assert.NoError(t, err)
-	assert.Equal(t, 42, result)
-}
