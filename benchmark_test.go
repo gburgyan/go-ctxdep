@@ -40,7 +40,7 @@ func BenchmarkGetSimpleGenerator(b *testing.B) {
 	}
 }
 
-func BenchmarkGetGeneratorWithDepenency(b *testing.B) {
+func BenchmarkGetGeneratorWithDependency(b *testing.B) {
 	ctx := NewDependencyContext(context.Background(), func() *testWidget {
 		return &testWidget{Val: 42}
 	}, func(_ *testWidget) *testDoodad {
@@ -58,7 +58,7 @@ func BenchmarkGetGeneratorWithDepenency(b *testing.B) {
 	}
 }
 
-func BenchmarkGetGeneratorWithDepenencyAndContext(b *testing.B) {
+func BenchmarkGetGeneratorWithDependencyAndContext(b *testing.B) {
 	ctx := NewDependencyContext(context.Background(), func() *testWidget {
 		return &testWidget{Val: 42}
 	}, func(_ context.Context, _ *testWidget) *testDoodad {
