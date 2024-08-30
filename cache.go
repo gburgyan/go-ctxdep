@@ -76,6 +76,9 @@ type CtxCacheOptions struct {
 	// results of the generator function. The duration provider can use this
 	// to determine the TTL.
 	DurationProvider CacheDurationProvider
+
+	// now is used for testing purposes to override the current time.
+	now func() time.Time
 }
 
 // CacheDurationProvider is a type alias for a function that takes a slice of any type
@@ -224,6 +227,9 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 	if opts.DurationProvider == nil {
 		opts.DurationProvider = DefaultDurationProvider
 	}
+	if opts.now == nil {
+		opts.now = time.Now
+	}
 
 	genType := reflect.TypeOf(generator)
 	if genType.Kind() != reflect.Func {
@@ -267,6 +273,13 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 
 	cacheLock := internalLock{}
 
+	state := cacheState{
+		opts:          opts,
+		hasContext:    hasContext,
+		baseGenerator: baseGenerator,
+		cache:         cache,
+	}
+
 	return reflect.MakeFunc(cachedGeneratorFunc, func(args []reflect.Value) []reflect.Value {
 		var ctx context.Context
 		for _, arg := range args {
@@ -278,21 +291,8 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 		cacheKey := generatorParamKeys(args) + "//" + returnTypeKey
 		cachedValues := cache.Get(ctx, cacheKey)
 		if cachedValues != nil {
-			cachedValueIndex := 0 // Note that we don't cache errors, so the index can differ.
-			returnVals := make([]reflect.Value, len(outTypes))
-			for i, outType := range outTypes {
-				if outType.ConvertibleTo(errorType) {
-					// The cached results should not contain errors, so just make nil errors.
-					returnVals[i] = reflect.Zero(outType)
-				} else {
-					// Populate the return value with the cached value.
-					val := reflect.New(outType).Elem()
-					cachedValue := reflect.ValueOf(cachedValues[cachedValueIndex])
-					cachedValueIndex++
-					val.Set(cachedValue)
-					returnVals[i] = val
-				}
-			}
+			returnVals, _, _ := generateCacheResult(outTypes, cachedValues)
+
 			return returnVals
 		}
 
@@ -306,19 +306,49 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 		intUnlock := cacheLock.Lock(cacheKey)
 		defer intUnlock()
 
-		results := callBackingFunction(ctx, args, cacheKey, opts, hasContext, baseGenerator, cache)
+		results := callBackingFunction(ctx, args, cacheKey, &state)
 
 		return results
 	}).Interface()
 }
 
-func callBackingFunction(ctx context.Context, args []reflect.Value, cacheKey string, opts CtxCacheOptions, hasContext bool, baseGenerator reflect.Value, cache Cache) []reflect.Value {
+type cacheState struct {
+	opts          CtxCacheOptions
+	hasContext    bool
+	baseGenerator reflect.Value
+	cache         Cache
+}
+
+func generateCacheResult(outTypes []reflect.Type, cachedValues []any) ([]reflect.Value, time.Time, time.Duration) {
+	cachedValueIndex := 0 // Note that we don't cache errors, so the index can differ.
+	returnVals := make([]reflect.Value, len(outTypes))
+	for i, outType := range outTypes {
+		if outType.ConvertibleTo(errorType) {
+			// The cached results should not contain errors, so just make nil errors.
+			returnVals[i] = reflect.Zero(outType)
+		} else {
+			// Populate the return value with the cached value.
+			val := reflect.New(outType).Elem()
+			cachedValue := reflect.ValueOf(cachedValues[cachedValueIndex])
+			cachedValueIndex++
+			val.Set(cachedValue)
+			returnVals[i] = val
+		}
+	}
+
+	saveTime := cachedValues[cachedValueIndex].(time.Time)
+	ttl := cachedValues[cachedValueIndex+1].(time.Duration)
+
+	return returnVals, saveTime, ttl
+}
+
+func callBackingFunction(ctx context.Context, args []reflect.Value, cacheKey string, state *cacheState) []reflect.Value {
 	// If we added a context, then it'll be at the end. Remove it if we added it.
 	funcArgs := args
-	if !hasContext {
+	if !state.hasContext {
 		funcArgs = funcArgs[:len(funcArgs)-1]
 	}
-	results := baseGenerator.Call(funcArgs)
+	results := state.baseGenerator.Call(funcArgs)
 
 	cacheVals := make([]any, 0)
 
@@ -338,10 +368,13 @@ func callBackingFunction(ctx context.Context, args []reflect.Value, cacheKey str
 		cacheVals = append(cacheVals, result.Interface())
 	}
 
-	ttl := opts.DurationProvider(opts, cacheVals)
+	ttl := state.opts.DurationProvider(state.opts, cacheVals)
+	now := state.opts.now()
+	cacheVals = append(cacheVals, now)
+	cacheVals = append(cacheVals, ttl)
 
 	if ttl > 0 {
-		cache.SetTTL(ctx, cacheKey, cacheVals, ttl)
+		state.cache.SetTTL(ctx, cacheKey, cacheVals, ttl)
 	}
 	return results
 }
