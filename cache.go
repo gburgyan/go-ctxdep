@@ -327,7 +327,7 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 		}
 
 		intUnlock, err := cacheLock.Lock(ctx, cacheKey)
-		if intUnlock == nil {
+		if intUnlock != nil {
 			defer intUnlock()
 		}
 		if err != nil {
@@ -352,12 +352,7 @@ func handlePreRefresh(ctx context.Context, cacheKey string, state *cacheState, s
 		return
 	}
 
-	probability := refreshProbability(ttl, opts, state, savedTime)
-	if probability <= 0 {
-		return
-	}
-
-	if rand.Float64() < probability {
+	if !shouldPreRefresh(ttl, opts, state, savedTime) {
 		return
 	}
 
@@ -382,6 +377,9 @@ func handlePreRefresh(ctx context.Context, cacheKey string, state *cacheState, s
 		// function would be called, so the expectation is that the backing
 		// function is fast enough to not cause a timeout.
 		defer func() {
+			// Since we're on a background goroutine, we need to recover
+			// from panics. We don't want to crash the program because of
+			// a panic in a background goroutine.
 			if p := recover(); p != nil {
 				log.Printf("Panic in background goroutine refreshing cache: %v\n", p)
 				buf := make([]byte, 1<<16)
@@ -395,18 +393,32 @@ func handlePreRefresh(ctx context.Context, cacheKey string, state *cacheState, s
 	}()
 }
 
-func refreshProbability(ttl time.Duration, opts CtxCacheOptions, state *cacheState, savedTime time.Time) float64 {
+func shouldPreRefresh(ttl time.Duration, opts CtxCacheOptions, state *cacheState, savedTime time.Time) bool {
 	slope, intercept := calculatePreRefreshCoefficients(ttl, opts)
 
 	age := state.opts.now().Sub(savedTime).Seconds()
 	percentage := slope*age + intercept
 
 	if percentage < 0 {
-		return 0
+		return false
 	}
+
+	if opts.RefreshAlpha <= 1 {
+		return true
+	}
+
 	alpha := opts.RefreshAlpha
 	probability := math.Pow(percentage, alpha-1)
-	return probability
+
+	if probability <= 0 {
+		return false
+	}
+
+	if rand.Float64() < probability {
+		return false
+	}
+
+	return true
 }
 
 func calculatePreRefreshCoefficients(ttl time.Duration, opts CtxCacheOptions) (slope float64, intercept float64) {
@@ -601,8 +613,8 @@ func (il *internalLock) Unlock(key string) {
 	defer il.mu.Unlock()
 	if _, ok := il.keys[key]; ok {
 		il.keys[key].release()
-		delete(il.keys, key)
 	}
+	delete(il.keys, key)
 }
 
 type internalLockWait struct {
