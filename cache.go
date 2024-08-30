@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -264,6 +265,8 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 
 	cachedGeneratorFunc := reflect.FuncOf(inTypes, outTypes, false)
 
+	cacheLock := internalLock{}
+
 	return reflect.MakeFunc(cachedGeneratorFunc, func(args []reflect.Value) []reflect.Value {
 		var ctx context.Context
 		for _, arg := range args {
@@ -300,39 +303,47 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 			defer unlock()
 		}
 
-		// If we added a context, then it'll be at the end. Remove it if we added it.
-		funcArgs := args
-		if !hasContext {
-			funcArgs = funcArgs[:len(funcArgs)-1]
-		}
-		results := baseGenerator.Call(funcArgs)
+		intUnlock := cacheLock.Lock(cacheKey)
+		defer intUnlock()
 
-		cacheVals := make([]any, 0)
-
-		// Verify that the results are valid.
-		for _, result := range results {
-			if result.Type().ConvertibleTo(errorType) {
-				if !result.IsNil() {
-					// If there is an error, don't cache the result
-					return results
-				}
-				continue
-			} else if result.IsZero() {
-				// If the result is nil, don't cache the result
-				return results
-			}
-
-			cacheVals = append(cacheVals, result.Interface())
-		}
-
-		ttl := opts.DurationProvider(opts, cacheVals)
-
-		if ttl > 0 {
-			cache.SetTTL(ctx, cacheKey, cacheVals, ttl)
-		}
+		results := callBackingFunction(ctx, args, cacheKey, opts, hasContext, baseGenerator, cache)
 
 		return results
 	}).Interface()
+}
+
+func callBackingFunction(ctx context.Context, args []reflect.Value, cacheKey string, opts CtxCacheOptions, hasContext bool, baseGenerator reflect.Value, cache Cache) []reflect.Value {
+	// If we added a context, then it'll be at the end. Remove it if we added it.
+	funcArgs := args
+	if !hasContext {
+		funcArgs = funcArgs[:len(funcArgs)-1]
+	}
+	results := baseGenerator.Call(funcArgs)
+
+	cacheVals := make([]any, 0)
+
+	// Verify that the results are valid.
+	for _, result := range results {
+		if result.Type().ConvertibleTo(errorType) {
+			if !result.IsNil() {
+				// If there is an error, don't cache the result
+				return results
+			}
+			continue
+		} else if result.IsZero() {
+			// If the result is nil, don't cache the result
+			return results
+		}
+
+		cacheVals = append(cacheVals, result.Interface())
+	}
+
+	ttl := opts.DurationProvider(opts, cacheVals)
+
+	if ttl > 0 {
+		cache.SetTTL(ctx, cacheKey, cacheVals, ttl)
+	}
+	return results
 }
 
 // generatorReturnTypes returns a string that represents the return
@@ -397,4 +408,76 @@ func DefaultDurationProvider(opts CtxCacheOptions, rets []any) time.Duration {
 		}
 	}
 	return lowestTtl
+}
+
+type internalLock struct {
+	mu   sync.Mutex
+	keys map[string]*internalLockWait
+}
+
+func (il *internalLock) Lock(key string) func() {
+	il.mu.Lock()
+	defer il.mu.Unlock()
+	if il.keys == nil {
+		il.keys = make(map[string]*internalLockWait)
+	}
+	if _, ok := il.keys[key]; ok {
+		// Already locked, add a wait.
+		il.keys[key].wait()
+	}
+	il.keys[key] = &internalLockWait{
+		strobe: make([]chan struct{}, 0),
+	}
+	return func() {
+		il.Unlock(key)
+	}
+}
+
+func (il *internalLock) LockOptional(key string) (bool, func()) {
+	il.mu.Lock()
+	defer il.mu.Unlock()
+	if il.keys == nil {
+		il.keys = make(map[string]*internalLockWait)
+	}
+	if _, ok := il.keys[key]; ok {
+		// Already locked, return false that we did not get the lock.
+		return false, nil
+	}
+	il.keys[key] = &internalLockWait{
+		strobe: make([]chan struct{}, 0),
+	}
+	return true, func() {
+		il.Unlock(key)
+	}
+}
+
+func (il *internalLock) Unlock(key string) {
+	il.mu.Lock()
+	defer il.mu.Unlock()
+	if _, ok := il.keys[key]; ok {
+		il.keys[key].release()
+		delete(il.keys, key)
+	}
+}
+
+type internalLockWait struct {
+	mu     sync.Mutex
+	strobe []chan struct{}
+}
+
+func (ilw *internalLockWait) wait() {
+	ch := make(chan struct{})
+	ilw.mu.Lock()
+	ilw.strobe = append(ilw.strobe, ch)
+	ilw.mu.Unlock()
+	<-ch
+}
+
+func (ilw *internalLockWait) release() {
+	ilw.mu.Lock()
+	for _, ch := range ilw.strobe {
+		close(ch)
+	}
+	ilw.strobe = nil
+	ilw.mu.Unlock()
 }
