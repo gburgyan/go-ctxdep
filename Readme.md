@@ -264,11 +264,12 @@ The `cache` object is expected to implement the `ctxdep.Cache` interface. The `c
 type Cache interface {
     Get(ctx context.Context, key string) []any
     SetTTL(ctx context.Context, key string, value []any, ttl time.Duration)
-    Lock(ctx context.Context, key string) func()
 }
 ```
 
-The expectation is that this interface can wrap whatever caching system you want to use. Lock is used to ensure that only one goroutine is generating the value for a key at a time, however the implementation of that is not required -- you can simply return a no-op function or nil and things will function as expected.
+There are many implementations of in-memory caches for Go, and it should be easy to adapt any of these to the `Cache` interface. If the cache needs to evict cache entries before the TTL expires, that is fine and expected. The only rule is that the `[]any` objects that are set using the `SetTTL` call, are equivalent to the `[]any` that are returned by the `Get`. 
+
+The expectation is that this interface can wrap whatever caching system you want to use. Internally, there is a lock that will ensure that only a single call to the generator function will occur for each instance of a cache. This does not handle distributed locking if the cache provider is serializing to a shared resource. There is a specialized implementation similar to this cache for Redis that can be found in the related [go-rediscache](https://github.com/gburgyan/go-rediscache) package that offers more robust distributed locking, but specific to Redis.
 
 ## Cache key generation
 
@@ -277,6 +278,12 @@ The simplest way is to implement the `Keyable` interface as described above. If,
 * You can call `ctxdep.RegisterCacheKeyProvider` with a custom function that will be called that generates the cache key.
 * If the type implements the `Stringer` interface, that will be used to generate the cache key.
 * The object is serialized using the default JSON serializer, and the result of that is used as the key.
+
+## Pre-refreshing the cache
+
+By initializing the cache by calling `CachedOpts`, you can enable some more advanced options. In addition to the TTL and duration provider mentioned earlier, this also exposes the `RefreshPercentage` option. This allows you to trigger a refresh of the cache in the background while returning the still valid cached results. If you set `RefreshPercentage` to 0.75, and access the cache 75% of the lifetime of a cache entry, the backing function will get called to refresh the cache. The refreshing occurs on a separate goroutine so the primary execution path is not delayed.
+
+Even if multiple clients of the cache trigger a potential refresh, only a single refresh will occur.
 
 # Why all this is important
 
@@ -527,6 +534,10 @@ CtxGen(*ctxdep.testDoodad) > CtxGen(*ctxdep.testWidget) - 3.084µs (generator:(c
 
 In this case, this is showing that the call to get the `*testDoodad` invoked a generator `gen(context.Context, *ctxdep.testWidget) *ctxdep.testDoodad`, which needed the `*testWidget`, which invoked another generator. The names of the timing contexts are that of the requested type that prompted the generator call. The actual signature of the generator is added as additional details for the timing context. If a generator produces multiple outputs, only the first call to the context dependencies gets explicit timing logging as the generator is only invoked once.
 
-This level of detail may or may not be helpful, but it does add a lot of extra information to the timing that is being gathered which can be useful if you are completely stumped how things are working or time is being spent.
+This level of detail may or may not be helpful, but it does add a lot of extra information to the timing that is being gathered which can be useful if you are completely stumped about how things are working or time is being spent.
 
 What may be more useful generally is to use `TimingImmediate` and handle any known long calls with your own timing calls.
+
+# License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

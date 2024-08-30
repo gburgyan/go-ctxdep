@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"reflect"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -52,14 +55,6 @@ type Cache interface {
 	// The value parameter is a slice of pointers to the results of
 	// the generator function.
 	SetTTL(ctx context.Context, key string, value []any, ttl time.Duration)
-
-	// Lock locks the given key. If the key is already locked, this
-	// will block until the key is unlocked. The returned function
-	// must be called to unlock the key. This is used to prevent
-	// multiple goroutines from calling the generator function for
-	// the same key. This is optional; if the cache does not support
-	// locking, it can return nil or no-op function.
-	Lock(ctx context.Context, key string) func()
 }
 
 // CtxCacheOptions contains the options for the CachedOpts function.
@@ -75,6 +70,16 @@ type CtxCacheOptions struct {
 	// results of the generator function. The duration provider can use this
 	// to determine the TTL.
 	DurationProvider CacheDurationProvider
+
+	// RefreshPercentage expresses the percentage of the TTL at which the cache
+	// entry should be refreshed. If RefreshPercentage is 1, the cache entry will
+	// not be refreshed. If RefreshPercentage is 0.5, the cache entry will be refreshed
+	// halfway through its TTL. This setting is useful for ensuring that the cache
+	// entry is always fresh and fetching new data before the cache entry expires.
+	RefreshPercentage float64
+
+	// now is used for testing purposes to override the current time.
+	now func() time.Time
 }
 
 // CacheDurationProvider is a type alias for a function that takes a slice of any type
@@ -223,7 +228,58 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 	if opts.DurationProvider == nil {
 		opts.DurationProvider = DefaultDurationProvider
 	}
+	if opts.now == nil {
+		opts.now = time.Now
+	}
 
+	state := makeStateForGenerator(cache, generator, opts)
+
+	cachedGeneratorFunc := reflect.FuncOf(state.inTypes, state.outTypes, false)
+	return reflect.MakeFunc(cachedGeneratorFunc, func(args []reflect.Value) []reflect.Value {
+		var ctx context.Context
+		for _, arg := range args {
+			if arg.CanConvert(contextType) {
+				ctx = arg.Interface().(context.Context)
+				break
+			}
+		}
+		cacheKey := generatorParamKeys(args) + "//" + state.returnTypeKey
+
+		intUnlock, err := state.internalLock.lock(ctx, cacheKey)
+		if intUnlock != nil {
+			defer intUnlock()
+		}
+
+		if err != nil {
+			// If we can't lock the key, just call the backing function
+			// If this is due to a timeout, it's on the called function
+			// to handle the timeout.
+			log.Printf("Failed to lock cache key: %v\n", err)
+		}
+
+		cachedValues := cache.Get(ctx, cacheKey)
+		if cachedValues != nil {
+			returnVals, savedTime, ttl := generateCacheResult(state.outTypes, cachedValues)
+			handlePreRefresh(ctx, cacheKey, state, args, savedTime, ttl)
+			return returnVals
+		}
+
+		return callBackingFunction(ctx, args, cacheKey, state)
+	}).Interface()
+}
+
+// makeStateForGenerator creates and initializes a cacheState for the given generator function.
+// It inspects the generator function to determine its input and output types, and sets up
+// the necessary state for caching.
+//
+// Parameters:
+// - cache: The cache implementation used to store the results of the generator function.
+// - generator: The generator function whose results are to be cached. Must be a function.
+// - opts: The options for the cache, including TTL and refresh settings.
+//
+// Returns:
+// - A pointer to a cacheState structure that contains the state for the generator function.
+func makeStateForGenerator(cache Cache, generator any, opts CtxCacheOptions) *cacheState {
 	genType := reflect.TypeOf(generator)
 	if genType.Kind() != reflect.Func {
 		panic("generator must be a function")
@@ -260,85 +316,206 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 		outTypes[i] = genType.Out(i)
 	}
 
-	returnTypeKey := generatorReturnTypes(outTypes)
+	returnTypeKey := generatorReturnTypesKey(outTypes)
 
-	cachedGeneratorFunc := reflect.FuncOf(inTypes, outTypes, false)
+	cacheLock := internalLock{}
 
-	return reflect.MakeFunc(cachedGeneratorFunc, func(args []reflect.Value) []reflect.Value {
-		var ctx context.Context
-		for _, arg := range args {
-			if arg.CanConvert(contextType) {
-				ctx = arg.Interface().(context.Context)
-				break
-			}
-		}
-		cacheKey := generatorParamKeys(args) + "//" + returnTypeKey
-		cachedValues := cache.Get(ctx, cacheKey)
-		if cachedValues != nil {
-			cachedValueIndex := 0 // Note that we don't cache errors, so the index can differ.
-			returnVals := make([]reflect.Value, len(outTypes))
-			for i, outType := range outTypes {
-				if outType.ConvertibleTo(errorType) {
-					// The cached results should not contain errors, so just make nil errors.
-					returnVals[i] = reflect.Zero(outType)
-				} else {
-					// Populate the return value with the cached value.
-					val := reflect.New(outType).Elem()
-					cachedValue := reflect.ValueOf(cachedValues[cachedValueIndex])
-					cachedValueIndex++
-					val.Set(cachedValue)
-					returnVals[i] = val
-				}
-			}
-			return returnVals
-		}
-
-		// If the cache supports locking, lock the key.
-		unlock := cache.Lock(ctx, cacheKey)
-		if unlock != nil {
-			// If we have an unlocker, unlock the key when we return.
-			defer unlock()
-		}
-
-		// If we added a context, then it'll be at the end. Remove it if we added it.
-		funcArgs := args
-		if !hasContext {
-			funcArgs = funcArgs[:len(funcArgs)-1]
-		}
-		results := baseGenerator.Call(funcArgs)
-
-		cacheVals := make([]any, 0)
-
-		// Verify that the results are valid.
-		for _, result := range results {
-			if result.Type().ConvertibleTo(errorType) {
-				if !result.IsNil() {
-					// If there is an error, don't cache the result
-					return results
-				}
-				continue
-			} else if result.IsZero() {
-				// If the result is nil, don't cache the result
-				return results
-			}
-
-			cacheVals = append(cacheVals, result.Interface())
-		}
-
-		ttl := opts.DurationProvider(opts, cacheVals)
-
-		if ttl > 0 {
-			cache.SetTTL(ctx, cacheKey, cacheVals, ttl)
-		}
-
-		return results
-	}).Interface()
+	state := cacheState{
+		opts:          opts,
+		hasContext:    hasContext,
+		baseGenerator: baseGenerator,
+		cache:         cache,
+		internalLock:  &cacheLock,
+		returnTypeKey: returnTypeKey,
+		inTypes:       inTypes,
+		outTypes:      outTypes,
+	}
+	return &state
 }
 
-// generatorReturnTypes returns a string that represents the return
+// handlePreRefresh determines if the cache entry should be refreshed and initiates the refresh process if necessary.
+//
+// Parameters:
+// - ctx: The context for the function call, used for cancellation and timeouts.
+// - cacheKey: The key used to store the results in the cache.
+// - state: The current state of the cache, including options and the generator function.
+// - args: A slice of reflect.Value representing the arguments to pass to the generator function.
+// - savedTime: The time when the cache entry was saved.
+// - ttl: The time-to-live duration for the cache entry.
+func handlePreRefresh(ctx context.Context, cacheKey string, state *cacheState, args []reflect.Value, savedTime time.Time, ttl time.Duration) {
+	opts := state.opts
+	if opts.RefreshPercentage <= 0 {
+		return
+	}
+
+	if !shouldPreRefresh(state, ttl, savedTime) {
+		return
+	}
+
+	prefetchKey := cacheKey + "-prefetch"
+	isLockSuccess, unlock := state.internalLock.lockOptional(prefetchKey)
+	if unlock != nil {
+		defer unlock()
+	}
+	if !isLockSuccess {
+		// Someone else is already refreshing the cache entry.
+		return
+	}
+
+	// Refresh the cache entry
+	go func() {
+		// At this point, we're inheriting the ctx of the caller. This is
+		// so any timeouts associated with the caller are inherited by the
+		// background goroutine. This is important because we don't want
+		// the background goroutine to run forever.
+		//
+		// This is called at the same time a regular call to the backing
+		// function would be called, so the expectation is that the backing
+		// function is fast enough to not cause a timeout.
+		defer func() {
+			// Since we're on a background goroutine, we need to recover
+			// from panics. We don't want to crash the program because of
+			// a panic in a background goroutine.
+			if p := recover(); p != nil {
+				log.Printf("Panic in background goroutine refreshing cache: %v\n", p)
+				buf := make([]byte, 1<<16)
+				stackSize := runtime.Stack(buf, true)
+				log.Printf("Stack trace: %s\n", buf[:stackSize])
+			}
+		}()
+
+		// We don't need the return value since it's just a refresh, and we're not going to return anything
+		_ = callBackingFunction(ctx, args, cacheKey, state)
+	}()
+}
+
+// shouldPreRefresh determines if the cache entry should be refreshed based on the given state, TTL, and saved time.
+//
+// Parameters:
+// - state: The current state of the cache, including options and internal lock.
+// - ttl: The time-to-live duration for the cache entry.
+// - savedTime: The time when the cache entry was saved.
+//
+// Returns:
+// - A boolean value indicating whether the cache entry should be refreshed.
+func shouldPreRefresh(state *cacheState, ttl time.Duration, savedTime time.Time) bool {
+	age := state.opts.now().Sub(savedTime).Seconds()
+	percentage := age / ttl.Seconds()
+
+	if percentage < state.opts.RefreshPercentage {
+		return false
+	}
+
+	return true
+}
+
+// cacheState represents the state of the cache for a given generator function.
+// It contains the options for the cache, the generator function, and the internal lock.
+//
+// Fields:
+// - opts: The options for the cache, including TTL and refresh settings.
+// - hasContext: A boolean indicating whether the generator function takes a context parameter.
+// - baseGenerator: The original generator function that produces the cacheable results.
+// - cache: The cache implementation used to store the results of the generator function.
+// - internalLock: An internal lock used to synchronize access to the cache.
+// - returnTypeKey: A string representing the return types of the generator function.
+// - inTypes: A slice of reflect.Type representing the input types of the generator function.
+// - outTypes: A slice of reflect.Type representing the output types of the generator function.
+type cacheState struct {
+	opts          CtxCacheOptions
+	hasContext    bool
+	baseGenerator reflect.Value
+	cache         Cache
+	internalLock  *internalLock
+	returnTypeKey string
+	inTypes       []reflect.Type
+	outTypes      []reflect.Type
+}
+
+// generateCacheResult generates the cached result values, saved time, and TTL from the given cached values.
+//
+// Parameters:
+// - outTypes: A slice of reflect.Type representing the output types of the generator function.
+// - cachedValues: A slice of any type representing the cached values.
+//
+// Returns:
+// - A slice of reflect.Value representing the return values of the generator function.
+// - A time.Time value representing the time when the cache entry was saved.
+// - A time.Duration value representing the TTL of the cache entry.
+func generateCacheResult(outTypes []reflect.Type, cachedValues []any) ([]reflect.Value, time.Time, time.Duration) {
+	cachedValueIndex := 0 // Note that we don't cache errors, so the index can differ.
+	returnVals := make([]reflect.Value, len(outTypes))
+	for i, outType := range outTypes {
+		if outType.ConvertibleTo(errorType) {
+			// The cached results should not contain errors, so just make nil errors.
+			returnVals[i] = reflect.Zero(outType)
+		} else {
+			// Populate the return value with the cached value.
+			val := reflect.New(outType).Elem()
+			cachedValue := reflect.ValueOf(cachedValues[cachedValueIndex])
+			cachedValueIndex++
+			val.Set(cachedValue)
+			returnVals[i] = val
+		}
+	}
+
+	saveTime := cachedValues[cachedValueIndex].(time.Time)
+	ttl := cachedValues[cachedValueIndex+1].(time.Duration)
+
+	return returnVals, saveTime, ttl
+}
+
+// callBackingFunction calls the original generator function and caches its results if they are valid.
+//
+// Parameters:
+// - ctx: The context for the function call, used for cancellation and timeouts.
+// - args: A slice of reflect.Value representing the arguments to pass to the generator function.
+// - cacheKey: The key used to store the results in the cache.
+// - state: The current state of the cache, including options and the generator function.
+//
+// Returns:
+// - A slice of reflect.Value representing the results of the generator function call.
+func callBackingFunction(ctx context.Context, args []reflect.Value, cacheKey string, state *cacheState) []reflect.Value {
+	// If we added a context, then it'll be at the end. Remove it if we added it.
+	funcArgs := args
+	if !state.hasContext {
+		funcArgs = funcArgs[:len(funcArgs)-1]
+	}
+	results := state.baseGenerator.Call(funcArgs)
+
+	cacheVals := make([]any, 0)
+
+	// Verify that the results are valid.
+	for _, result := range results {
+		if result.Type().ConvertibleTo(errorType) {
+			if !result.IsNil() {
+				// If there is an error, don't cache the result
+				return results
+			}
+			continue
+		} else if result.IsZero() {
+			// If the result is nil, don't cache the result
+			return results
+		}
+
+		cacheVals = append(cacheVals, result.Interface())
+	}
+
+	ttl := state.opts.DurationProvider(state.opts, cacheVals)
+	now := state.opts.now()
+	cacheVals = append(cacheVals, now)
+	cacheVals = append(cacheVals, ttl)
+
+	if ttl > 0 {
+		state.cache.SetTTL(ctx, cacheKey, cacheVals, ttl)
+	}
+	return results
+}
+
+// generatorReturnTypesKey returns a string that represents the return
 // types of the generator function. This is used to generate a unique
 // signature for the given generator function.
-func generatorReturnTypes(resultTypes []reflect.Type) string {
+func generatorReturnTypesKey(resultTypes []reflect.Type) string {
 	builder := strings.Builder{}
 	for _, resultType := range resultTypes {
 		if resultType.ConvertibleTo(errorType) {
@@ -397,4 +574,135 @@ func DefaultDurationProvider(opts CtxCacheOptions, rets []any) time.Duration {
 		}
 	}
 	return lowestTtl
+}
+
+// internalLock is a structure that manages locking mechanisms for keys.
+// It uses a mutex to ensure thread-safe operations and a map to track the keys being locked.
+//
+// Fields:
+// - mu: A sync.Mutex used to ensure that the operations on the keys map are thread-safe.
+// - keys: A map where the key is a string representing the lock key, and the value is a pointer to an internalLockWait structure.
+type internalLock struct {
+	mu   sync.Mutex
+	keys map[string]*internalLockWait
+}
+
+// lock attempts to acquire a lock for the given key in a thread-safe manner.
+// If the key is already locked, it waits until the key is unlocked and retries.
+//
+// Parameters:
+// - ctx: The context for the function call, used for cancellation and timeouts.
+// - key: The key to lock.
+//
+// Returns:
+// - A function that unlocks the key when called.
+// - An error if the context is canceled or times out while waiting for the lock.
+func (il *internalLock) lock(ctx context.Context, key string) (func(), error) {
+	for {
+		il.mu.Lock()
+		if il.keys == nil {
+			il.keys = make(map[string]*internalLockWait)
+		}
+		if _, ok := il.keys[key]; ok {
+			// Already locked, add a wait.
+			il.mu.Unlock()
+			err := il.keys[key].wait(ctx)
+			if err != nil {
+				return nil, err
+			}
+			// Retry after waiting
+			continue
+		}
+		il.keys[key] = &internalLockWait{
+			strobe: make([]chan struct{}, 0),
+		}
+		il.mu.Unlock()
+		return func() {
+			il.unlock(key)
+		}, nil
+	}
+}
+
+// lockOptional attempts to acquire a lock for the given key in a thread-safe manner without blocking.
+// If the key is already locked, it returns false and a nil unlock function.
+//
+// Parameters:
+// - key: The key to lock.
+//
+// Returns:
+// - A boolean indicating whether the lock was successfully acquired.
+// - A function that unlocks the key when called, or nil if the lock was not acquired.
+func (il *internalLock) lockOptional(key string) (bool, func()) {
+	il.mu.Lock()
+	defer il.mu.Unlock()
+	if il.keys == nil {
+		il.keys = make(map[string]*internalLockWait)
+	}
+	if _, ok := il.keys[key]; ok {
+		// Already locked, return false that we did not get the lock.
+		return false, nil
+	}
+	il.keys[key] = &internalLockWait{
+		strobe: make([]chan struct{}, 0),
+	}
+	return true, func() {
+		il.unlock(key)
+	}
+}
+
+// unlock releases the lock for the given key in a thread-safe manner.
+// It removes the key from the internal map and releases any goroutines waiting on the lock.
+//
+// Parameters:
+// - key: The key to unlock.
+func (il *internalLock) unlock(key string) {
+	il.mu.Lock()
+	defer il.mu.Unlock()
+	if _, ok := il.keys[key]; ok {
+		il.keys[key].release()
+	}
+	delete(il.keys, key)
+}
+
+// internalLockWait is a structure that manages waiting mechanisms for locks.
+// It uses a mutex to ensure thread-safe operations and a slice of channels to signal waiting goroutines.
+//
+// Fields:
+// - mu: A sync.Mutex used to ensure that the operations on the strobe slice are thread-safe.
+// - strobe: A slice of channels used to signal waiting goroutines.
+type internalLockWait struct {
+	mu     sync.Mutex
+	strobe []chan struct{}
+}
+
+// wait waits for the lock to be released or the context to be canceled.
+// It adds a channel to the strobe slice and waits for it to be closed.
+//
+// Parameters:
+// - ctx: The context for the function call, used for cancellation and timeouts.
+//
+// Returns:
+// - An error if the context is canceled or times out while waiting for the lock.
+func (ilw *internalLockWait) wait(ctx context.Context) error {
+	ch := make(chan struct{})
+	ilw.mu.Lock()
+	ilw.strobe = append(ilw.strobe, ch)
+	ilw.mu.Unlock()
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// release releases all waiting goroutines by closing their channels.
+// It removes all channels from the strobe slice.
+func (ilw *internalLockWait) release() {
+	ilw.mu.Lock()
+	defer ilw.mu.Unlock()
+	for _, ch := range ilw.strobe {
+		close(ch)
+	}
+	ilw.strobe = nil
 }
