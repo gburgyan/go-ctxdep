@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"math"
+	"math/rand"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -54,12 +58,13 @@ type Cache interface {
 	// the generator function.
 	SetTTL(ctx context.Context, key string, value []any, ttl time.Duration)
 
-	// Lock locks the given key. If the key is already locked, this
-	// will block until the key is unlocked. The returned function
-	// must be called to unlock the key. This is used to prevent
-	// multiple goroutines from calling the generator function for
-	// the same key. This is optional; if the cache does not support
-	// locking, it can return nil or no-op function.
+	// Lock locks the given key in an external store. Internally, the caching system
+	// has the concept of an internal lock, but this allows the cache to lock the key
+	// in an external store, such as Redis. This is used to prevent multiple goroutines
+	// from calling the generator function for the same key. If the key is already locked, this
+	// should block until the key is unlocked. The returned function must be called to unlock
+	// the key. This is optional; if the cache does not support locking, it can return nil or
+	// no-op function.
 	Lock(ctx context.Context, key string) func()
 }
 
@@ -76,6 +81,9 @@ type CtxCacheOptions struct {
 	// results of the generator function. The duration provider can use this
 	// to determine the TTL.
 	DurationProvider CacheDurationProvider
+
+	RefreshPercentage float64
+	RefreshAlpha      float64
 
 	// now is used for testing purposes to override the current time.
 	now func() time.Time
@@ -278,6 +286,7 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 		hasContext:    hasContext,
 		baseGenerator: baseGenerator,
 		cache:         cache,
+		internalLock:  &cacheLock,
 	}
 
 	return reflect.MakeFunc(cachedGeneratorFunc, func(args []reflect.Value) []reflect.Value {
@@ -291,8 +300,8 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 		cacheKey := generatorParamKeys(args) + "//" + returnTypeKey
 		cachedValues := cache.Get(ctx, cacheKey)
 		if cachedValues != nil {
-			returnVals, _, _ := generateCacheResult(outTypes, cachedValues)
-
+			returnVals, savedTime, ttl := generateCacheResult(outTypes, cachedValues)
+			handlePreRefresh(ctx, cache, cacheKey, &state, savedTime, ttl)
 			return returnVals
 		}
 
@@ -312,11 +321,66 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 	}).Interface()
 }
 
+func handlePreRefresh(ctx context.Context, cache Cache, cacheKey string, state *cacheState, savedTime time.Time, ttl time.Duration) {
+	opts := state.opts
+	if opts.RefreshPercentage <= 0 {
+		return
+	}
+	if opts.RefreshAlpha <= 0 {
+		return
+	}
+
+	window := opts.TTL.Seconds()
+	effectiveWindow := (opts.TTL.Seconds() * (1 - opts.RefreshPercentage))
+	scale := window / effectiveWindow
+	slope := 1 / effectiveWindow
+	intercept := 1 - scale
+
+	age := state.opts.now().Sub(savedTime).Seconds()
+	percentage := slope*age + intercept
+
+	if percentage < 0 {
+		return
+	}
+	alpha := opts.RefreshAlpha
+	probability := math.Pow(percentage, alpha-1)
+
+	if rand.Float64() < probability {
+		return
+	}
+
+	prefetchKey := cacheKey + "-prefetch"
+	isLocked, unlock := state.internalLock.LockOptional(prefetchKey)
+	if unlock != nil {
+		defer unlock()
+	}
+	if isLocked {
+		// Someone else is already refreshing the cache entry.
+		return
+	}
+
+	// Refresh the cache entry
+	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				log.Printf("Panic in background goroutine refreshing cache: %v\n", p)
+				buf := make([]byte, 1<<16)
+				stackSize := runtime.Stack(buf, true)
+				log.Printf("Stack trace: %s\n", buf[:stackSize])
+			}
+		}()
+
+		// We don't need the return value since it's just a refresh, and we're not going to return anything
+		_ = callBackingFunction(ctx, nil, cacheKey, state)
+	}()
+}
+
 type cacheState struct {
 	opts          CtxCacheOptions
 	hasContext    bool
 	baseGenerator reflect.Value
 	cache         Cache
+	internalLock  *internalLock
 }
 
 func generateCacheResult(outTypes []reflect.Type, cachedValues []any) ([]reflect.Value, time.Time, time.Duration) {
