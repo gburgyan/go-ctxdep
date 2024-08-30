@@ -82,8 +82,22 @@ type CtxCacheOptions struct {
 	// to determine the TTL.
 	DurationProvider CacheDurationProvider
 
+	// RefreshPercentage expresses the percentage of the TTL at which the cache
+	// entry should be refreshed. If RefreshPercentage is 1, the cache entry will
+	// not be refreshed. If RefreshPercentage is 0.5, the cache entry will be refreshed
+	// halfway through its TTL. This setting is useful for ensuring that the cache
+	// entry is always fresh and fetching new data before the cache entry expires.
 	RefreshPercentage float64
-	RefreshAlpha      float64
+
+	// RefreshAlpha is the alpha value used to calculate the probability of refreshing
+	// the cache entry. The time range between when a cache entry is eligible for
+	// refresh and the TTL-LockTTL is scaled to the range [0, 1] and called x.
+	// The probability of refreshing the cache entry is calculated as x^(alpha-1).
+	// If RefreshAlpha is 1 or less, the cache entry will be refreshed immediately
+	// when it is eligible for refresh. A higher alpha value will make it less likely
+	// that the cache entry will be refreshed.
+	// A value of 0 will inherit the default alpha for the cache.
+	RefreshAlpha float64
 
 	// now is used for testing purposes to override the current time.
 	now func() time.Time
@@ -301,7 +315,7 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 		cachedValues := cache.Get(ctx, cacheKey)
 		if cachedValues != nil {
 			returnVals, savedTime, ttl := generateCacheResult(outTypes, cachedValues)
-			handlePreRefresh(ctx, cache, cacheKey, &state, savedTime, ttl)
+			handlePreRefresh(ctx, cacheKey, &state, savedTime, ttl)
 			return returnVals
 		}
 
@@ -312,8 +326,16 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 			defer unlock()
 		}
 
-		intUnlock := cacheLock.Lock(cacheKey)
-		defer intUnlock()
+		intUnlock, err := cacheLock.Lock(ctx, cacheKey)
+		if intUnlock == nil {
+			defer intUnlock()
+		}
+		if err != nil {
+			// If we can't lock the key, just call the backing function
+			// If this is due to a timeout, it's on the called function
+			// to handle the timeout.
+			return callBackingFunction(ctx, args, cacheKey, &state)
+		}
 
 		results := callBackingFunction(ctx, args, cacheKey, &state)
 
@@ -321,7 +343,7 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 	}).Interface()
 }
 
-func handlePreRefresh(ctx context.Context, cache Cache, cacheKey string, state *cacheState, savedTime time.Time, ttl time.Duration) {
+func handlePreRefresh(ctx context.Context, cacheKey string, state *cacheState, savedTime time.Time, ttl time.Duration) {
 	opts := state.opts
 	if opts.RefreshPercentage <= 0 {
 		return
@@ -330,20 +352,10 @@ func handlePreRefresh(ctx context.Context, cache Cache, cacheKey string, state *
 		return
 	}
 
-	window := opts.TTL.Seconds()
-	effectiveWindow := (opts.TTL.Seconds() * (1 - opts.RefreshPercentage))
-	scale := window / effectiveWindow
-	slope := 1 / effectiveWindow
-	intercept := 1 - scale
-
-	age := state.opts.now().Sub(savedTime).Seconds()
-	percentage := slope*age + intercept
-
-	if percentage < 0 {
+	probability := refreshProbability(ttl, opts, state, savedTime)
+	if probability <= 0 {
 		return
 	}
-	alpha := opts.RefreshAlpha
-	probability := math.Pow(percentage, alpha-1)
 
 	if rand.Float64() < probability {
 		return
@@ -361,6 +373,14 @@ func handlePreRefresh(ctx context.Context, cache Cache, cacheKey string, state *
 
 	// Refresh the cache entry
 	go func() {
+		// At this point, we're inheriting the ctx of the caller. This is
+		// so any timeouts associated with the caller are inherited by the
+		// background goroutine. This is important because we don't want
+		// the background goroutine to run forever.
+		//
+		// This is called at the same time a regular call to the backing
+		// function would be called, so the expectation is that the backing
+		// function is fast enough to not cause a timeout.
 		defer func() {
 			if p := recover(); p != nil {
 				log.Printf("Panic in background goroutine refreshing cache: %v\n", p)
@@ -373,6 +393,29 @@ func handlePreRefresh(ctx context.Context, cache Cache, cacheKey string, state *
 		// We don't need the return value since it's just a refresh, and we're not going to return anything
 		_ = callBackingFunction(ctx, nil, cacheKey, state)
 	}()
+}
+
+func refreshProbability(ttl time.Duration, opts CtxCacheOptions, state *cacheState, savedTime time.Time) float64 {
+	slope, intercept := calculatePreRefreshCoefficients(ttl, opts)
+
+	age := state.opts.now().Sub(savedTime).Seconds()
+	percentage := slope*age + intercept
+
+	if percentage < 0 {
+		return 0
+	}
+	alpha := opts.RefreshAlpha
+	probability := math.Pow(percentage, alpha-1)
+	return probability
+}
+
+func calculatePreRefreshCoefficients(ttl time.Duration, opts CtxCacheOptions) (slope float64, intercept float64) {
+	window := ttl.Seconds()
+	effectiveWindow := ttl.Seconds() * (1 - opts.RefreshPercentage)
+	scale := window / effectiveWindow
+	slope = 1 / effectiveWindow
+	intercept = 1 - scale
+	return
 }
 
 type cacheState struct {
@@ -512,22 +555,27 @@ type internalLock struct {
 	keys map[string]*internalLockWait
 }
 
-func (il *internalLock) Lock(key string) func() {
+func (il *internalLock) Lock(ctx context.Context, key string) (func(), error) {
 	il.mu.Lock()
-	defer il.mu.Unlock()
 	if il.keys == nil {
 		il.keys = make(map[string]*internalLockWait)
 	}
 	if _, ok := il.keys[key]; ok {
 		// Already locked, add a wait.
-		il.keys[key].wait()
+		il.mu.Unlock()
+		err := il.keys[key].wait(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return il.Lock(ctx, key)
 	}
 	il.keys[key] = &internalLockWait{
 		strobe: make([]chan struct{}, 0),
 	}
+	il.mu.Unlock()
 	return func() {
 		il.Unlock(key)
-	}
+	}, nil
 }
 
 func (il *internalLock) LockOptional(key string) (bool, func()) {
@@ -562,19 +610,24 @@ type internalLockWait struct {
 	strobe []chan struct{}
 }
 
-func (ilw *internalLockWait) wait() {
+func (ilw *internalLockWait) wait(ctx context.Context) error {
 	ch := make(chan struct{})
 	ilw.mu.Lock()
 	ilw.strobe = append(ilw.strobe, ch)
 	ilw.mu.Unlock()
-	<-ch
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (ilw *internalLockWait) release() {
 	ilw.mu.Lock()
+	defer ilw.mu.Unlock()
 	for _, ch := range ilw.strobe {
 		close(ch)
 	}
 	ilw.strobe = nil
-	ilw.mu.Unlock()
 }
