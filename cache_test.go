@@ -107,7 +107,7 @@ func Test_CacheCustom(t *testing.T) {
 	input := &inputValue{Value: "42"}
 	var retDuration time.Duration
 
-	ttlProvider := func(anies []any) time.Duration {
+	ttlProvider := func(opts CtxCacheOptions, anies []any) time.Duration {
 		outVal := anies[0].(*outputValue)
 		// Convert the output value to an int, and use that as the TTL in minutes.
 		i, err := strconv.Atoi(outVal.Value)
