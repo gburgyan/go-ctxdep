@@ -89,6 +89,16 @@ type CtxCacheOptions struct {
 	// entry is always fresh and fetching new data before the cache entry expires.
 	RefreshPercentage float64
 
+	// ForceRefreshPercentage expresses the percentage of the TTL at which the cache
+	// entry should be refreshed. If ForceRefreshPercentage is 1, the cache entry will
+	// not be refreshed. If ForceRefreshPercentage is 0.5, the cache entry will be refreshed
+	// halfway through its TTL. This setting is useful for ensuring that the cache
+	// entry is always fresh and fetching new data before the cache entry expires. This
+	// is a way of tuning when the refresh should happen. It sets an upper bound on when
+	// the RefreshAlpha will no longer be relevant. If this is <= 0 or >= 1, it will be
+	// ignored.
+	ForceRefreshPercentage float64
+
 	// RefreshAlpha is the alpha value used to calculate the probability of refreshing
 	// the cache entry. The time range between when a cache entry is eligible for
 	// refresh and the TTL-LockTTL is scaled to the range [0, 1] and called x.
@@ -348,9 +358,6 @@ func handlePreRefresh(ctx context.Context, cacheKey string, state *cacheState, s
 	if opts.RefreshPercentage <= 0 {
 		return
 	}
-	if opts.RefreshAlpha <= 0 {
-		return
-	}
 
 	if !shouldPreRefresh(ttl, opts, state, savedTime) {
 		return
@@ -423,7 +430,11 @@ func shouldPreRefresh(ttl time.Duration, opts CtxCacheOptions, state *cacheState
 
 func calculatePreRefreshCoefficients(ttl time.Duration, opts CtxCacheOptions) (slope float64, intercept float64) {
 	window := ttl.Seconds()
-	effectiveWindow := ttl.Seconds() * (1 - opts.RefreshPercentage)
+	forceRefreshPercentage := opts.ForceRefreshPercentage
+	if forceRefreshPercentage <= 0 {
+		forceRefreshPercentage = 1
+	}
+	effectiveWindow := window * (forceRefreshPercentage - opts.RefreshPercentage)
 	scale := window / effectiveWindow
 	slope = 1 / effectiveWindow
 	intercept = 1 - scale

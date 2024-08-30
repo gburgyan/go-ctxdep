@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/stretchr/testify/assert"
+	"math"
 	"reflect"
 	"strconv"
 	"testing"
@@ -369,4 +370,171 @@ func Test_Cache_ObjectTTL_Zero(t *testing.T) {
 
 	assert.Empty(t, cache.values)
 	assert.Equal(t, 0, r1.minutes)
+}
+
+func Test_Lock_AlreadyLocked(t *testing.T) {
+	il := &internalLock{}
+	ctx := context.Background()
+	key := "testKey"
+
+	// First lock
+	unlock1, err := il.Lock(ctx, key)
+	assert.NoError(t, err)
+	assert.NotNil(t, unlock1)
+
+	// Second lock should wait
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		unlock2, err := il.Lock(ctx, key)
+		assert.NoError(t, err)
+		assert.NotNil(t, unlock2)
+		unlock2()
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("Second lock should not have succeeded immediately")
+	case <-time.After(100 * time.Millisecond):
+		// Expected to timeout
+	}
+
+	// Unlock the first lock
+	unlock1()
+
+	// Now the second lock should succeed
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Second lock should have succeeded after first unlock")
+	}
+}
+
+func Test_Lock_ContextCancelled(t *testing.T) {
+	il := &internalLock{}
+	ctx, cancel := context.WithCancel(context.Background())
+	key := "testKey"
+
+	// First lock
+	unlock1, err := il.Lock(ctx, key)
+	assert.NoError(t, err)
+	assert.NotNil(t, unlock1)
+
+	// Cancel the context
+	cancel()
+
+	// Second lock should fail due to cancelled context
+	_, err = il.Lock(ctx, key)
+	assert.Error(t, err)
+
+	// Unlock the first lock
+	unlock1()
+}
+
+func Test_Lock_NoKeys(t *testing.T) {
+	il := &internalLock{}
+	ctx := context.Background()
+	key := "testKey"
+
+	// Lock with no keys initialized
+	unlock, err := il.Lock(ctx, key)
+	assert.NoError(t, err)
+	assert.NotNil(t, unlock)
+
+	// Ensure the key is locked
+	_, ok := il.keys[key]
+	assert.True(t, ok)
+
+	// Unlock the key
+	unlock()
+	_, ok = il.keys[key]
+	assert.False(t, ok)
+}
+
+func Test_LockOptional_Success(t *testing.T) {
+	il := &internalLock{}
+	key := "testKey"
+
+	locked, unlock := il.LockOptional(key)
+	assert.True(t, locked)
+	assert.NotNil(t, unlock)
+
+	_, ok := il.keys[key]
+	assert.True(t, ok)
+
+	unlock()
+	_, ok = il.keys[key]
+	assert.False(t, ok)
+}
+
+func Test_LockOptional_AlreadyLocked(t *testing.T) {
+	il := &internalLock{}
+	key := "testKey"
+
+	locked1, unlock1 := il.LockOptional(key)
+	assert.True(t, locked1)
+	assert.NotNil(t, unlock1)
+
+	locked2, unlock2 := il.LockOptional(key)
+	assert.False(t, locked2)
+	assert.Nil(t, unlock2)
+
+	unlock1()
+	_, ok := il.keys[key]
+	assert.False(t, ok)
+}
+
+func Test_LockOptional_NoKeysInitialized(t *testing.T) {
+	il := &internalLock{}
+	key := "testKey"
+
+	locked, unlock := il.LockOptional(key)
+	assert.True(t, locked)
+	assert.NotNil(t, unlock)
+
+	_, ok := il.keys[key]
+	assert.True(t, ok)
+
+	unlock()
+	_, ok = il.keys[key]
+	assert.False(t, ok)
+}
+
+func Test_CalculatePreRefreshCoefficients_ValidInputs(t *testing.T) {
+	opts := CtxCacheOptions{
+		RefreshPercentage:      0.5,
+		ForceRefreshPercentage: 0.8,
+	}
+	ttl := time.Minute * 10
+
+	slope, intercept := calculatePreRefreshCoefficients(ttl, opts)
+
+	assert.InDelta(t, 0.00555555, slope, 0.0001)
+	assert.InDelta(t, -2.33333333, intercept, 0.0001)
+}
+
+func Test_CalculatePreRefreshCoefficients_EqualPercentages(t *testing.T) {
+	opts := CtxCacheOptions{
+		RefreshPercentage:      0.5,
+		ForceRefreshPercentage: 0.5,
+	}
+	ttl := time.Minute * 10
+
+	slope, intercept := calculatePreRefreshCoefficients(ttl, opts)
+
+	assert.True(t, math.IsInf(slope, 1))
+	assert.True(t, math.IsInf(intercept, -1))
+}
+
+func Test_CalculatePreRefreshCoefficients_NoForceRefresh(t *testing.T) {
+	opts := CtxCacheOptions{
+		RefreshPercentage:      0.5,
+		ForceRefreshPercentage: 0,
+	}
+	ttl := time.Minute * 10
+
+	slope, intercept := calculatePreRefreshCoefficients(ttl, opts)
+
+	assert.InDelta(t, 0.0033333, slope, 0.0001)
+	assert.InDelta(t, -1, intercept, 0.0001)
 }
