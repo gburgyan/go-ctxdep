@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math"
-	"math/rand"
 	"reflect"
 	"runtime"
 	"strings"
@@ -88,26 +86,6 @@ type CtxCacheOptions struct {
 	// halfway through its TTL. This setting is useful for ensuring that the cache
 	// entry is always fresh and fetching new data before the cache entry expires.
 	RefreshPercentage float64
-
-	// ForceRefreshPercentage expresses the percentage of the TTL at which the cache
-	// entry should be refreshed. If ForceRefreshPercentage is 1, the cache entry will
-	// not be refreshed. If ForceRefreshPercentage is 0.5, the cache entry will be refreshed
-	// halfway through its TTL. This setting is useful for ensuring that the cache
-	// entry is always fresh and fetching new data before the cache entry expires. This
-	// is a way of tuning when the refresh should happen. It sets an upper bound on when
-	// the RefreshAlpha will no longer be relevant. If this is <= 0 or >= 1, it will be
-	// ignored.
-	ForceRefreshPercentage float64
-
-	// RefreshAlpha is the alpha value used to calculate the probability of refreshing
-	// the cache entry. The time range between when a cache entry is eligible for
-	// refresh and the TTL-LockTTL is scaled to the range [0, 1] and called x.
-	// The probability of refreshing the cache entry is calculated as x^(alpha-1).
-	// If RefreshAlpha is 1 or less, the cache entry will be refreshed immediately
-	// when it is eligible for refresh. A higher alpha value will make it less likely
-	// that the cache entry will be refreshed.
-	// A value of 0 will inherit the default alpha for the cache.
-	RefreshAlpha float64
 
 	// now is used for testing purposes to override the current time.
 	now func() time.Time
@@ -360,11 +338,11 @@ func makeStateForGenerator(cache Cache, generator any, opts CtxCacheOptions) *ca
 
 func handlePreRefresh(ctx context.Context, cacheKey string, state *cacheState, args []reflect.Value, savedTime time.Time, ttl time.Duration) {
 	opts := state.opts
-	if opts.RefreshPercentage <= 0 || (opts.ForceRefreshPercentage <= opts.RefreshPercentage) {
+	if opts.RefreshPercentage <= 0 {
 		return
 	}
 
-	if !shouldPreRefresh(ttl, opts, state, savedTime) {
+	if !shouldPreRefresh(state, ttl, savedTime) {
 		return
 	}
 
@@ -405,42 +383,15 @@ func handlePreRefresh(ctx context.Context, cacheKey string, state *cacheState, a
 	}()
 }
 
-func shouldPreRefresh(ttl time.Duration, opts CtxCacheOptions, state *cacheState, savedTime time.Time) bool {
-	slope, intercept := calculatePreRefreshCoefficients(ttl, opts)
-
+func shouldPreRefresh(state *cacheState, ttl time.Duration, savedTime time.Time) bool {
 	age := state.opts.now().Sub(savedTime).Seconds()
-	percentage := slope*age + intercept
+	percentage := age / ttl.Seconds()
 
-	if percentage < 0 {
-		return false
-	}
-
-	if opts.RefreshAlpha <= 1 {
-		return true
-	}
-
-	alpha := opts.RefreshAlpha
-	probability := math.Pow(percentage, alpha-1)
-
-	if rand.Float64() > probability {
+	if percentage < state.opts.RefreshPercentage {
 		return false
 	}
 
 	return true
-}
-
-func calculatePreRefreshCoefficients(ttl time.Duration, opts CtxCacheOptions) (slope float64, intercept float64) {
-	forceRefreshPercentage := opts.ForceRefreshPercentage
-	if forceRefreshPercentage <= 0 {
-		forceRefreshPercentage = 1
-	}
-	totalWindow := ttl.Seconds()
-	window := totalWindow * forceRefreshPercentage
-	effectiveWindow := totalWindow * (forceRefreshPercentage - opts.RefreshPercentage)
-	scale := window / effectiveWindow
-	slope = 1 / effectiveWindow
-	intercept = 1 - scale
-	return
 }
 
 type cacheState struct {
