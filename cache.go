@@ -355,7 +355,7 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 
 func handlePreRefresh(ctx context.Context, cacheKey string, state *cacheState, savedTime time.Time, ttl time.Duration) {
 	opts := state.opts
-	if opts.RefreshPercentage <= 0 {
+	if opts.RefreshPercentage <= 0 || (opts.ForceRefreshPercentage <= opts.RefreshPercentage) {
 		return
 	}
 
