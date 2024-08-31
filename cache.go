@@ -417,11 +417,7 @@ func shouldPreRefresh(ttl time.Duration, opts CtxCacheOptions, state *cacheState
 	alpha := opts.RefreshAlpha
 	probability := math.Pow(percentage, alpha-1)
 
-	if probability <= 0 {
-		return false
-	}
-
-	if rand.Float64() < probability {
+	if rand.Float64() > probability {
 		return false
 	}
 
@@ -429,12 +425,13 @@ func shouldPreRefresh(ttl time.Duration, opts CtxCacheOptions, state *cacheState
 }
 
 func calculatePreRefreshCoefficients(ttl time.Duration, opts CtxCacheOptions) (slope float64, intercept float64) {
-	window := ttl.Seconds()
 	forceRefreshPercentage := opts.ForceRefreshPercentage
 	if forceRefreshPercentage <= 0 {
 		forceRefreshPercentage = 1
 	}
-	effectiveWindow := window * (forceRefreshPercentage - opts.RefreshPercentage)
+	totalWindow := ttl.Seconds()
+	window := totalWindow * forceRefreshPercentage
+	effectiveWindow := totalWindow * (forceRefreshPercentage - opts.RefreshPercentage)
 	scale := window / effectiveWindow
 	slope = 1 / effectiveWindow
 	intercept = 1 - scale

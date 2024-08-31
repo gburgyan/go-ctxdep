@@ -510,7 +510,7 @@ func Test_CalculatePreRefreshCoefficients_ValidInputs(t *testing.T) {
 	slope, intercept := calculatePreRefreshCoefficients(ttl, opts)
 
 	assert.InDelta(t, 0.00555555, slope, 0.0001)
-	assert.InDelta(t, -2.33333333, intercept, 0.0001)
+	assert.InDelta(t, -1.66666666, intercept, 0.0001)
 }
 
 func Test_CalculatePreRefreshCoefficients_EqualPercentages(t *testing.T) {
@@ -537,4 +537,89 @@ func Test_CalculatePreRefreshCoefficients_NoForceRefresh(t *testing.T) {
 
 	assert.InDelta(t, 0.0033333, slope, 0.0001)
 	assert.InDelta(t, -1, intercept, 0.0001)
+}
+
+func Test_shouldPreRefresh_StartOfTTL(t *testing.T) {
+	now := time.Now()
+	opts := CtxCacheOptions{
+		RefreshPercentage:      0.5,
+		ForceRefreshPercentage: 0.8,
+		RefreshAlpha:           2,
+		now:                    func() time.Time { return now },
+	}
+	state := &cacheState{opts: opts}
+	savedTime := now
+	ttl := time.Minute * 10
+
+	result := shouldPreRefresh(ttl, opts, state, savedTime)
+
+	assert.False(t, result)
+}
+
+func Test_shouldPreRefresh_EndOfTTL(t *testing.T) {
+	now := time.Now()
+	opts := CtxCacheOptions{
+		RefreshPercentage:      0.5,
+		ForceRefreshPercentage: 0.8,
+		RefreshAlpha:           2,
+		now:                    func() time.Time { return now },
+	}
+	state := &cacheState{opts: opts}
+	savedTime := now.Add(-time.Minute * 10)
+	ttl := time.Minute * 10
+
+	result := shouldPreRefresh(ttl, opts, state, savedTime)
+
+	assert.True(t, result)
+}
+
+func Test_shouldPreRefresh_AlphaLessThanOrEqualToOne(t *testing.T) {
+	now := time.Now()
+	opts := CtxCacheOptions{
+		RefreshPercentage:      0.5,
+		ForceRefreshPercentage: 0.8,
+		RefreshAlpha:           1,
+		now:                    func() time.Time { return now },
+	}
+	state := &cacheState{opts: opts}
+	savedTime := now.Add(-time.Minute * 5)
+	ttl := time.Minute * 10
+
+	result := shouldPreRefresh(ttl, opts, state, savedTime)
+
+	assert.True(t, result)
+}
+
+func Test_shouldPreRefresh_ProbOne(t *testing.T) {
+	now := time.Now()
+	opts := CtxCacheOptions{
+		RefreshPercentage:      0.5,
+		ForceRefreshPercentage: 0.8,
+		RefreshAlpha:           1.000000000001,
+		now:                    func() time.Time { return now },
+	}
+	state := &cacheState{opts: opts}
+	savedTime := now.Add(-time.Minute*8 - time.Microsecond)
+	ttl := time.Minute * 10
+
+	result := shouldPreRefresh(ttl, opts, state, savedTime)
+
+	assert.True(t, result)
+}
+
+func Test_shouldPreRefresh_ProbZero(t *testing.T) {
+	now := time.Now()
+	opts := CtxCacheOptions{
+		RefreshPercentage:      0.5,
+		ForceRefreshPercentage: 0.8,
+		RefreshAlpha:           1000,
+		now:                    func() time.Time { return now },
+	}
+	state := &cacheState{opts: opts}
+	savedTime := now.Add(-time.Minute*5 - time.Microsecond)
+	ttl := time.Minute * 10
+
+	result := shouldPreRefresh(ttl, opts, state, savedTime)
+
+	assert.False(t, result)
 }
