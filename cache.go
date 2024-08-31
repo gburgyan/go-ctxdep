@@ -278,7 +278,9 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 		// both try to generate the cache. This is a very small window, and the worst
 		// that can happen is that the cache is generated twice. The added cost of the
 		// additional Get call to check if the cache is present is not worth the added
-		// complexity and cost to prevent this minimal race.
+		// complexity and cost to prevent this minimal race. If protection from this is
+		// needed, you can use the related go-rediscache package, which has a more robust
+		// distributed locking mechanism.
 
 		// If the cache supports locking, lock the key.
 		unlock := cache.Lock(ctx, cacheKey)
