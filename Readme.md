@@ -268,7 +268,9 @@ type Cache interface {
 }
 ```
 
-The expectation is that this interface can wrap whatever caching system you want to use. Lock is used to ensure that only one goroutine is generating the value for a key at a time, however the implementation of that is not required -- you can simply return a no-op function or nil and things will function as expected.
+The expectation is that this interface can wrap whatever caching system you want to use. Lock is used to ensure that only one goroutine is generating the value for a key at a time, however the implementation of that is not required -- you can simply return a no-op function or nil and things will function as expected. The intent is that this can be used to lock a resource that may be shared between several instances of the process.
+
+Internally, there is another lock that will ensure that only a single call to the generator function will occur.
 
 ## Cache key generation
 
@@ -277,6 +279,12 @@ The simplest way is to implement the `Keyable` interface as described above. If,
 * You can call `ctxdep.RegisterCacheKeyProvider` with a custom function that will be called that generates the cache key.
 * If the type implements the `Stringer` interface, that will be used to generate the cache key.
 * The object is serialized using the default JSON serializer, and the result of that is used as the key.
+
+## Pre-refreshing the cache
+
+By initializing the cache by calling `CachedOpts`, you can enable some more advanced options. In addition to the TTL and duration provider mentioned earlier, this also exposes the `RefreshPercentage` option. This allows you to trigger a refresh of the cache in the background while returning the still valid cached results. If you set `RefreshPercentage` to 0.75, and access the cache 75% of the lifetime of a cache entry, the backing function will get called to refresh the cache. The refreshing occurs on a separate goroutine so the primary execution path is not delayed.
+
+Even if multiple clients of the cache trigger a potential refresh, only a single refresh will occur.
 
 # Why all this is important
 

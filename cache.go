@@ -253,6 +253,19 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 			}
 		}
 		cacheKey := generatorParamKeys(args) + "//" + state.returnTypeKey
+
+		intUnlock, err := state.internalLock.lock(ctx, cacheKey)
+		if err != nil {
+			// If we can't lock the key, just call the backing function
+			// If this is due to a timeout, it's on the called function
+			// to handle the timeout.
+			log.Printf("Failed to lock cache key: %v\n", err)
+		}
+
+		if intUnlock != nil {
+			defer intUnlock()
+		}
+
 		cachedValues := cache.Get(ctx, cacheKey)
 		if cachedValues != nil {
 			returnVals, savedTime, ttl := generateCacheResult(state.outTypes, cachedValues)
@@ -260,22 +273,18 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 			return returnVals
 		}
 
+		// There is the briefest of race conditions here where two different instances
+		// running this cache function could both see that the cache is not present and
+		// both try to generate the cache. This is a very small window, and the worst
+		// that can happen is that the cache is generated twice. The added cost of the
+		// additional Get call to check if the cache is present is not worth the added
+		// complexity and cost to prevent this minimal race.
+
 		// If the cache supports locking, lock the key.
 		unlock := cache.Lock(ctx, cacheKey)
 		if unlock != nil {
 			// If we have an unlocker, unlock the key when we return.
 			defer unlock()
-		}
-
-		intUnlock, err := state.internalLock.lock(ctx, cacheKey)
-		if intUnlock != nil {
-			defer intUnlock()
-		}
-		if err != nil {
-			// If we can't lock the key, just call the backing function
-			// If this is due to a timeout, it's on the called function
-			// to handle the timeout.
-			log.Printf("Failed to lock cache key: %v\n", err)
 		}
 
 		return callBackingFunction(ctx, args, cacheKey, state)
