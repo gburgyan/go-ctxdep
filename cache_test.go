@@ -378,7 +378,7 @@ func Test_Lock_AlreadyLocked(t *testing.T) {
 	key := "testKey"
 
 	// First lock
-	unlock1, err := il.Lock(ctx, key)
+	unlock1, err := il.lock(ctx, key)
 	assert.NoError(t, err)
 	assert.NotNil(t, unlock1)
 
@@ -386,7 +386,7 @@ func Test_Lock_AlreadyLocked(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		unlock2, err := il.Lock(ctx, key)
+		unlock2, err := il.lock(ctx, key)
 		assert.NoError(t, err)
 		assert.NotNil(t, unlock2)
 		unlock2()
@@ -399,7 +399,7 @@ func Test_Lock_AlreadyLocked(t *testing.T) {
 		// Expected to timeout
 	}
 
-	// Unlock the first lock
+	// unlock the first lock
 	unlock1()
 
 	// Now the second lock should succeed
@@ -416,7 +416,7 @@ func Test_Lock_ContextCancelled(t *testing.T) {
 	key := "testKey"
 
 	// First lock
-	unlock1, err := il.Lock(ctx, key)
+	unlock1, err := il.lock(ctx, key)
 	assert.NoError(t, err)
 	assert.NotNil(t, unlock1)
 
@@ -424,7 +424,7 @@ func Test_Lock_ContextCancelled(t *testing.T) {
 	cancel()
 
 	// Second lock should fail due to cancelled context
-	_, err = il.Lock(ctx, key)
+	_, err = il.lock(ctx, key)
 	assert.Error(t, err)
 
 	// Unlock the first lock
@@ -436,8 +436,8 @@ func Test_Lock_NoKeys(t *testing.T) {
 	ctx := context.Background()
 	key := "testKey"
 
-	// Lock with no keys initialized
-	unlock, err := il.Lock(ctx, key)
+	// lock with no keys initialized
+	unlock, err := il.lock(ctx, key)
 	assert.NoError(t, err)
 	assert.NotNil(t, unlock)
 
@@ -445,7 +445,7 @@ func Test_Lock_NoKeys(t *testing.T) {
 	_, ok := il.keys[key]
 	assert.True(t, ok)
 
-	// Unlock the key
+	// unlock the key
 	unlock()
 	_, ok = il.keys[key]
 	assert.False(t, ok)
@@ -455,7 +455,7 @@ func Test_LockOptional_Success(t *testing.T) {
 	il := &internalLock{}
 	key := "testKey"
 
-	locked, unlock := il.LockOptional(key)
+	locked, unlock := il.lockOptional(key)
 	assert.True(t, locked)
 	assert.NotNil(t, unlock)
 
@@ -471,11 +471,11 @@ func Test_LockOptional_AlreadyLocked(t *testing.T) {
 	il := &internalLock{}
 	key := "testKey"
 
-	locked1, unlock1 := il.LockOptional(key)
+	locked1, unlock1 := il.lockOptional(key)
 	assert.True(t, locked1)
 	assert.NotNil(t, unlock1)
 
-	locked2, unlock2 := il.LockOptional(key)
+	locked2, unlock2 := il.lockOptional(key)
 	assert.False(t, locked2)
 	assert.Nil(t, unlock2)
 
@@ -488,7 +488,7 @@ func Test_LockOptional_NoKeysInitialized(t *testing.T) {
 	il := &internalLock{}
 	key := "testKey"
 
-	locked, unlock := il.LockOptional(key)
+	locked, unlock := il.lockOptional(key)
 	assert.True(t, locked)
 	assert.NotNil(t, unlock)
 
@@ -622,4 +622,144 @@ func Test_shouldPreRefresh_ProbZero(t *testing.T) {
 	result := shouldPreRefresh(ttl, opts, state, savedTime)
 
 	assert.False(t, result)
+}
+
+func Test_handlePreRefresh_AlreadyLocked(t *testing.T) {
+	ctx := context.Background()
+	cacheKey := "testKey"
+	now := time.Now()
+	cache := DumbCache{
+		values: make(map[string][]any),
+	}
+	calls := 0
+	f := func(s string) *string {
+		calls++
+		return &s
+	}
+	options := CtxCacheOptions{
+		RefreshPercentage:      0.5,
+		ForceRefreshPercentage: 0.8,
+		RefreshAlpha:           1,
+		now:                    func() time.Time { return now },
+	}
+	state := makeStateForGenerator(&cache, f, options)
+
+	savedTime := now.Add(-time.Minute * 6)
+	ttl := time.Minute * 10
+
+	unlock, err := state.internalLock.lock(ctx, cacheKey+"-prefetch")
+	assert.NoError(t, err)
+	defer unlock()
+
+	args := []reflect.Value{
+		reflect.ValueOf("test"),
+	}
+
+	handlePreRefresh(ctx, cacheKey, state, args, savedTime, ttl)
+	time.Sleep(time.Millisecond * 10)
+
+	assert.Equal(t, 0, calls)
+}
+
+func Test_handlePreRefresh_HappyCase(t *testing.T) {
+	ctx := context.Background()
+	cacheKey := "testKey"
+	now := time.Now()
+	cache := DumbCache{
+		values: make(map[string][]any),
+	}
+	calls := 0
+	f := func(s string) *string {
+		calls++
+		return &s
+	}
+	options := CtxCacheOptions{
+		RefreshPercentage:      0.5,
+		ForceRefreshPercentage: 0.8,
+		RefreshAlpha:           1,
+		DurationProvider:       DefaultDurationProvider,
+		now:                    func() time.Time { return now },
+	}
+	state := makeStateForGenerator(&cache, f, options)
+
+	savedTime := now.Add(-time.Minute * 6)
+	ttl := time.Minute * 10
+
+	args := []reflect.Value{
+		reflect.ValueOf("test"),
+		reflect.ValueOf(ctx),
+	}
+
+	handlePreRefresh(ctx, cacheKey, state, args, savedTime, ttl)
+	time.Sleep(time.Millisecond * 10)
+	assert.Equal(t, 1, calls)
+}
+
+func Test_handlePreRefresh_TooNew(t *testing.T) {
+	ctx := context.Background()
+	cacheKey := "testKey"
+	now := time.Now()
+	cache := DumbCache{
+		values: make(map[string][]any),
+	}
+	calls := 0
+	f := func(s string) *string {
+		calls++
+		return &s
+	}
+	options := CtxCacheOptions{
+		RefreshPercentage:      0.5,
+		ForceRefreshPercentage: 0.8,
+		RefreshAlpha:           1,
+		DurationProvider:       DefaultDurationProvider,
+		now:                    func() time.Time { return now },
+	}
+	state := makeStateForGenerator(&cache, f, options)
+
+	savedTime := now.Add(-time.Minute * 2)
+	ttl := time.Minute * 10
+
+	args := []reflect.Value{
+		reflect.ValueOf("test"),
+		reflect.ValueOf(ctx),
+	}
+
+	handlePreRefresh(ctx, cacheKey, state, args, savedTime, ttl)
+	time.Sleep(time.Millisecond * 10)
+	assert.Equal(t, 0, calls)
+}
+
+func Test_handlePreRefresh_Panics(t *testing.T) {
+	ctx := context.Background()
+	cacheKey := "testKey"
+	now := time.Now()
+	cache := DumbCache{
+		values: make(map[string][]any),
+	}
+	calls := 0
+	f := func(s string) *string {
+		calls++
+		panic("test panic")
+	}
+	options := CtxCacheOptions{
+		RefreshPercentage:      0.5,
+		ForceRefreshPercentage: 0.8,
+		RefreshAlpha:           1,
+		DurationProvider:       DefaultDurationProvider,
+		now:                    func() time.Time { return now },
+	}
+	state := makeStateForGenerator(&cache, f, options)
+
+	savedTime := now.Add(-time.Minute * 9)
+	ttl := time.Minute * 10
+
+	args := []reflect.Value{
+		reflect.ValueOf("test"),
+		reflect.ValueOf(ctx),
+	}
+
+	// The function panics, but the panic is caught and the function continues.
+	handlePreRefresh(ctx, cacheKey, state, args, savedTime, ttl)
+	time.Sleep(time.Millisecond * 10)
+	assert.Equal(t, 1, calls)
 }

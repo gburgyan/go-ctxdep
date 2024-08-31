@@ -263,6 +263,48 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 		opts.now = time.Now
 	}
 
+	state := makeStateForGenerator(cache, generator, opts)
+
+	cachedGeneratorFunc := reflect.FuncOf(state.inTypes, state.outTypes, false)
+	return reflect.MakeFunc(cachedGeneratorFunc, func(args []reflect.Value) []reflect.Value {
+		var ctx context.Context
+		for _, arg := range args {
+			if arg.CanConvert(contextType) {
+				ctx = arg.Interface().(context.Context)
+				break
+			}
+		}
+		cacheKey := generatorParamKeys(args) + "//" + state.returnTypeKey
+		cachedValues := cache.Get(ctx, cacheKey)
+		if cachedValues != nil {
+			returnVals, savedTime, ttl := generateCacheResult(state.outTypes, cachedValues)
+			handlePreRefresh(ctx, cacheKey, state, args, savedTime, ttl)
+			return returnVals
+		}
+
+		// If the cache supports locking, lock the key.
+		unlock := cache.Lock(ctx, cacheKey)
+		if unlock != nil {
+			// If we have an unlocker, unlock the key when we return.
+			defer unlock()
+		}
+
+		intUnlock, err := state.internalLock.lock(ctx, cacheKey)
+		if intUnlock != nil {
+			defer intUnlock()
+		}
+		if err != nil {
+			// If we can't lock the key, just call the backing function
+			// If this is due to a timeout, it's on the called function
+			// to handle the timeout.
+			log.Printf("Failed to lock cache key: %v\n", err)
+		}
+
+		return callBackingFunction(ctx, args, cacheKey, state)
+	}).Interface()
+}
+
+func makeStateForGenerator(cache Cache, generator any, opts CtxCacheOptions) *cacheState {
 	genType := reflect.TypeOf(generator)
 	if genType.Kind() != reflect.Func {
 		panic("generator must be a function")
@@ -301,8 +343,6 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 
 	returnTypeKey := generatorReturnTypes(outTypes)
 
-	cachedGeneratorFunc := reflect.FuncOf(inTypes, outTypes, false)
-
 	cacheLock := internalLock{}
 
 	state := cacheState{
@@ -311,49 +351,14 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 		baseGenerator: baseGenerator,
 		cache:         cache,
 		internalLock:  &cacheLock,
+		returnTypeKey: returnTypeKey,
+		inTypes:       inTypes,
+		outTypes:      outTypes,
 	}
-
-	return reflect.MakeFunc(cachedGeneratorFunc, func(args []reflect.Value) []reflect.Value {
-		var ctx context.Context
-		for _, arg := range args {
-			if arg.CanConvert(contextType) {
-				ctx = arg.Interface().(context.Context)
-				break
-			}
-		}
-		cacheKey := generatorParamKeys(args) + "//" + returnTypeKey
-		cachedValues := cache.Get(ctx, cacheKey)
-		if cachedValues != nil {
-			returnVals, savedTime, ttl := generateCacheResult(outTypes, cachedValues)
-			handlePreRefresh(ctx, cacheKey, &state, savedTime, ttl)
-			return returnVals
-		}
-
-		// If the cache supports locking, lock the key.
-		unlock := cache.Lock(ctx, cacheKey)
-		if unlock != nil {
-			// If we have an unlocker, unlock the key when we return.
-			defer unlock()
-		}
-
-		intUnlock, err := cacheLock.Lock(ctx, cacheKey)
-		if intUnlock != nil {
-			defer intUnlock()
-		}
-		if err != nil {
-			// If we can't lock the key, just call the backing function
-			// If this is due to a timeout, it's on the called function
-			// to handle the timeout.
-			return callBackingFunction(ctx, args, cacheKey, &state)
-		}
-
-		results := callBackingFunction(ctx, args, cacheKey, &state)
-
-		return results
-	}).Interface()
+	return &state
 }
 
-func handlePreRefresh(ctx context.Context, cacheKey string, state *cacheState, savedTime time.Time, ttl time.Duration) {
+func handlePreRefresh(ctx context.Context, cacheKey string, state *cacheState, args []reflect.Value, savedTime time.Time, ttl time.Duration) {
 	opts := state.opts
 	if opts.RefreshPercentage <= 0 || (opts.ForceRefreshPercentage <= opts.RefreshPercentage) {
 		return
@@ -364,11 +369,11 @@ func handlePreRefresh(ctx context.Context, cacheKey string, state *cacheState, s
 	}
 
 	prefetchKey := cacheKey + "-prefetch"
-	isLocked, unlock := state.internalLock.LockOptional(prefetchKey)
+	isLockSuccess, unlock := state.internalLock.lockOptional(prefetchKey)
 	if unlock != nil {
 		defer unlock()
 	}
-	if isLocked {
+	if !isLockSuccess {
 		// Someone else is already refreshing the cache entry.
 		return
 	}
@@ -396,7 +401,7 @@ func handlePreRefresh(ctx context.Context, cacheKey string, state *cacheState, s
 		}()
 
 		// We don't need the return value since it's just a refresh, and we're not going to return anything
-		_ = callBackingFunction(ctx, nil, cacheKey, state)
+		_ = callBackingFunction(ctx, args, cacheKey, state)
 	}()
 }
 
@@ -444,6 +449,9 @@ type cacheState struct {
 	baseGenerator reflect.Value
 	cache         Cache
 	internalLock  *internalLock
+	returnTypeKey string
+	inTypes       []reflect.Type
+	outTypes      []reflect.Type
 }
 
 func generateCacheResult(outTypes []reflect.Type, cachedValues []any) ([]reflect.Value, time.Time, time.Duration) {
@@ -575,7 +583,7 @@ type internalLock struct {
 	keys map[string]*internalLockWait
 }
 
-func (il *internalLock) Lock(ctx context.Context, key string) (func(), error) {
+func (il *internalLock) lock(ctx context.Context, key string) (func(), error) {
 	il.mu.Lock()
 	if il.keys == nil {
 		il.keys = make(map[string]*internalLockWait)
@@ -587,18 +595,18 @@ func (il *internalLock) Lock(ctx context.Context, key string) (func(), error) {
 		if err != nil {
 			return nil, err
 		}
-		return il.Lock(ctx, key)
+		return il.lock(ctx, key)
 	}
 	il.keys[key] = &internalLockWait{
 		strobe: make([]chan struct{}, 0),
 	}
 	il.mu.Unlock()
 	return func() {
-		il.Unlock(key)
+		il.unlock(key)
 	}, nil
 }
 
-func (il *internalLock) LockOptional(key string) (bool, func()) {
+func (il *internalLock) lockOptional(key string) (bool, func()) {
 	il.mu.Lock()
 	defer il.mu.Unlock()
 	if il.keys == nil {
@@ -612,11 +620,11 @@ func (il *internalLock) LockOptional(key string) (bool, func()) {
 		strobe: make([]chan struct{}, 0),
 	}
 	return true, func() {
-		il.Unlock(key)
+		il.unlock(key)
 	}
 }
 
-func (il *internalLock) Unlock(key string) {
+func (il *internalLock) unlock(key string) {
 	il.mu.Lock()
 	defer il.mu.Unlock()
 	if _, ok := il.keys[key]; ok {
