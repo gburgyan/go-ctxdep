@@ -267,7 +267,9 @@ type Cache interface {
 }
 ```
 
-The expectation is that this interface can wrap whatever caching system you want to use. Internally, there is a lock that will ensure that only a single call to the generator function will occur for each instance of a cache. This does not handle distributed locking if the cache provider is serializing to a shared resource. There is a specialized implementation similar to this cache for Redis that can be found in the related [go-rediscache](https://github.com/gburgyan/go-rediscache) package that offers more robust distributed locking, but specific to Redis. 
+There are many implementations of in-memory caches for Go, and it should be easy to adapt any of these to the `Cache` interface. If the cache needs to evict cache entries before the TTL expires, that is fine and expected. The only rule is that the `[]any` objects that are set using the `SetTTL` call, are equivalent to the `[]any` that are returned by the `Get`. 
+
+The expectation is that this interface can wrap whatever caching system you want to use. Internally, there is a lock that will ensure that only a single call to the generator function will occur for each instance of a cache. This does not handle distributed locking if the cache provider is serializing to a shared resource. There is a specialized implementation similar to this cache for Redis that can be found in the related [go-rediscache](https://github.com/gburgyan/go-rediscache) package that offers more robust distributed locking, but specific to Redis.
 
 ## Cache key generation
 
