@@ -55,15 +55,6 @@ type Cache interface {
 	// The value parameter is a slice of pointers to the results of
 	// the generator function.
 	SetTTL(ctx context.Context, key string, value []any, ttl time.Duration)
-
-	// Lock locks the given key in an external store. Internally, the caching system
-	// has the concept of an internal lock, but this allows the cache to lock the key
-	// in an external store, such as Redis. This is used to prevent multiple goroutines
-	// from calling the generator function for the same key. If the key is already locked, this
-	// should block until the key is unlocked. The returned function must be called to unlock
-	// the key. This is optional; if the cache does not support locking, it can return nil or
-	// no-op function.
-	Lock(ctx context.Context, key string) func()
 }
 
 // CtxCacheOptions contains the options for the CachedOpts function.
@@ -271,22 +262,6 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 			returnVals, savedTime, ttl := generateCacheResult(state.outTypes, cachedValues)
 			handlePreRefresh(ctx, cacheKey, state, args, savedTime, ttl)
 			return returnVals
-		}
-
-		// There is the briefest of race conditions here where two different instances
-		// running this cache function could both see that the cache is not present and
-		// both try to generate the cache. This is a very small window, and the worst
-		// that can happen is that the cache is generated twice. The added cost of the
-		// additional Get call to check if the cache is present is not worth the added
-		// complexity and cost to prevent this minimal race. If protection from this is
-		// needed, you can use the related go-rediscache package, which has a more robust
-		// distributed locking mechanism.
-
-		// If the cache supports locking, lock the key.
-		unlock := cache.Lock(ctx, cacheKey)
-		if unlock != nil {
-			// If we have an unlocker, unlock the key when we return.
-			defer unlock()
 		}
 
 		return callBackingFunction(ctx, args, cacheKey, state)

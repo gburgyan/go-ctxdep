@@ -264,13 +264,10 @@ The `cache` object is expected to implement the `ctxdep.Cache` interface. The `c
 type Cache interface {
     Get(ctx context.Context, key string) []any
     SetTTL(ctx context.Context, key string, value []any, ttl time.Duration)
-    Lock(ctx context.Context, key string) func()
 }
 ```
 
-The expectation is that this interface can wrap whatever caching system you want to use. Lock is used to ensure that only one goroutine is generating the value for a key at a time, however the implementation of that is not required -- you can simply return a no-op function or nil and things will function as expected. The intent is that this can be used to lock a resource that may be shared between several instances of the process.
-
-Internally, there is another lock that will ensure that only a single call to the generator function will occur.
+The expectation is that this interface can wrap whatever caching system you want to use. Internally, there is a lock that will ensure that only a single call to the generator function will occur for each instance of a cache. This does not handle distributed locking if the cache provider is serializing to a shared resource. There is a specialized implementation similar to this cache for Redis that can be found in the related [go-rediscache](https://github.com/gburgyan/go-rediscache) package that offers more robust distributed locking, but specific to Redis. 
 
 ## Cache key generation
 

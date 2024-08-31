@@ -56,16 +56,6 @@ func (d *DumbCache) SetTTL(ctx context.Context, key string, value []any, ttl tim
 	d.lastTtl = ttl
 }
 
-func (d *DumbCache) Lock(ctx context.Context, key string) func() {
-	if ctx == nil {
-		panic("ctx is nil")
-	}
-	d.lockCount++
-	return func() {
-		d.unlockCount++
-	}
-}
-
 func Test_Cache(t *testing.T) {
 	cache := DumbCache{
 		values: make(map[string][]any),
@@ -89,8 +79,6 @@ func Test_Cache(t *testing.T) {
 	assert.Equal(t, 1, callCount)
 	assert.Equal(t, "1", r1.Value)
 	assert.Equal(t, "1", r2.Value)
-	assert.Equal(t, 1, cache.lockCount)
-	assert.Equal(t, 1, cache.unlockCount)
 }
 
 func Test_CacheCustom(t *testing.T) {
@@ -156,8 +144,6 @@ func Test_CacheComplex(t *testing.T) {
 	assert.Equal(t, "2", r1b.Val)
 	assert.Equal(t, "1", r2a.Value)
 	assert.Equal(t, "2", r2b.Val)
-	assert.Equal(t, 1, cache.lockCount)
-	assert.Equal(t, 1, cache.unlockCount)
 }
 
 func Test_Cache_Error(t *testing.T) {
