@@ -534,6 +534,10 @@ CtxGen(*ctxdep.testDoodad) > CtxGen(*ctxdep.testWidget) - 3.084µs (generator:(c
 
 In this case, this is showing that the call to get the `*testDoodad` invoked a generator `gen(context.Context, *ctxdep.testWidget) *ctxdep.testDoodad`, which needed the `*testWidget`, which invoked another generator. The names of the timing contexts are that of the requested type that prompted the generator call. The actual signature of the generator is added as additional details for the timing context. If a generator produces multiple outputs, only the first call to the context dependencies gets explicit timing logging as the generator is only invoked once.
 
-This level of detail may or may not be helpful, but it does add a lot of extra information to the timing that is being gathered which can be useful if you are completely stumped how things are working or time is being spent.
+This level of detail may or may not be helpful, but it does add a lot of extra information to the timing that is being gathered which can be useful if you are completely stumped about how things are working or time is being spent.
 
 What may be more useful generally is to use `TimingImmediate` and handle any known long calls with your own timing calls.
+
+# License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
