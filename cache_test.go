@@ -290,14 +290,35 @@ func Test_Cache_NonKeyed_CustomKey(t *testing.T) {
 		return &outputValue{Value: strconv.Itoa(widget.Val)}, nil
 	}
 
-	RegisterCacheKeyProvider(reflect.TypeOf(&testWidget{}), func(any any) string {
+	RegisterCacheKeyProvider(reflect.TypeOf(&testWidget{}), func(any any) ([]byte, error) {
 		widget := any.(*testWidget)
-		return fmt.Sprintf("custom:%d", widget.Val)
+		return []byte(fmt.Sprintf("custom:%d", widget.Val)), nil
 	})
 
 	ctx := NewDependencyContext(context.Background(), &testWidget{Val: 42}, Cached(&cache, generator, time.Minute))
 	ov := Get[*outputValue](ctx)
 	assert.Contains(t, cache.values, "custom:42//outputValue")
+	assert.Equal(t, "42", ov.Value)
+}
+
+func Test_Cache_Interface(t *testing.T) {
+	cache := DumbCache{
+		values: make(map[string][]any),
+	}
+
+	generator := func(ctx context.Context, ti testInterface) (*outputValue, error) {
+		return &outputValue{Value: strconv.Itoa(ti.getVal())}, nil
+	}
+
+	RegisterCacheKeyProvider(reflect.TypeOf((*testInterface)(nil)).Elem(), func(any any) ([]byte, error) {
+		iface := any.(testInterface)
+		key := fmt.Sprintf("interface:%d", iface.getVal())
+		return []byte(key), nil
+	})
+
+	ctx := NewDependencyContext(context.Background(), &testImpl{val: 42}, Cached(&cache, generator, time.Minute))
+	ov := Get[*outputValue](ctx)
+	assert.Contains(t, cache.values, "interface:42//outputValue")
 	assert.Equal(t, "42", ov.Value)
 }
 

@@ -25,15 +25,20 @@ type Keyable interface {
 	CacheKey() string
 }
 
-var cacheKeyProviders = make(map[reflect.Type]func(any) string)
+var cacheKeyProviders = make(map[reflect.Type]func(any) ([]byte, error))
+var cacheKeyInterfaceProviders = make(map[reflect.Type]func(any) ([]byte, error))
 
 // RegisterCacheKeyProvider registers a function that can be used to
 // generate a cache key for a given type. This is used by the Cached()
 // function to generate a cache key for the given dependency. This
 // allows for the cache key to be generated for types that do not
 // implement the Keyable interface.
-func RegisterCacheKeyProvider(t reflect.Type, f func(any) string) {
-	cacheKeyProviders[t] = f
+func RegisterCacheKeyProvider(t reflect.Type, f func(any) ([]byte, error)) {
+	if t.Kind() == reflect.Interface {
+		cacheKeyInterfaceProviders[t] = f
+	} else {
+		cacheKeyProviders[t] = f
+	}
 }
 
 // Cache is an interface for a cache that can be used with the Cached() function.
@@ -544,15 +549,35 @@ func generatorParamKeys(args []reflect.Value) string {
 		if keyable, ok := val.(Keyable); ok {
 			builder.WriteString(keyable.CacheKey())
 		} else if provider, ok := cacheKeyProviders[arg.Type()]; ok {
-			builder.WriteString(provider(val))
+			bytes, err := provider(val)
+			if err != nil {
+				log.Printf("Error generating cache key: %v\n", err)
+				builder.WriteString(arg.Type().Elem().Name())
+			} else {
+				builder.WriteString(string(bytes))
+			}
 		} else if stringer, ok := val.(fmt.Stringer); ok {
 			builder.WriteString(stringer.String())
 		} else {
-			valJson, err := json.Marshal(val)
-			if err != nil || string(valJson) == "{}" {
-				builder.WriteString(arg.Type().Elem().Name())
-			} else {
-				builder.Write(valJson)
+			done := false
+			for iface, f := range cacheKeyInterfaceProviders {
+				if arg.Type().Implements(iface) {
+					bytes, err := f(val)
+					if err != nil {
+						continue
+					}
+					builder.WriteString(string(bytes))
+					done = true
+					break
+				}
+			}
+			if !done {
+				valJson, err := json.Marshal(val)
+				if err != nil || string(valJson) == "{}" {
+					builder.WriteString(arg.Type().Elem().Name())
+				} else {
+					builder.Write(valJson)
+				}
 			}
 		}
 	}
