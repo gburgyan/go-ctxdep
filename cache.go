@@ -248,7 +248,19 @@ func CachedOpts(cache Cache, generator any, opts CtxCacheOptions) any {
 				break
 			}
 		}
-		cacheKey := generatorParamKeys(args) + "//" + state.returnTypeKey
+
+		// If we added a context, then it'll be at the end. Remove it if we added it.
+		if !state.hasContext {
+			args = args[:len(args)-1]
+		}
+
+		cacheKey, err := generatorParamKeys(args)
+		if err != nil {
+			log.Printf("ERROR: Failed to generate cache key: %v\n", err)
+			return state.baseGenerator.Call(args)
+		}
+
+		cacheKey += "//" + state.returnTypeKey
 
 		intUnlock, err := state.internalLock.lock(ctx, cacheKey)
 		if intUnlock != nil {
@@ -481,12 +493,7 @@ func generateCacheResult(outTypes []reflect.Type, cachedValues []any) ([]reflect
 // Returns:
 // - A slice of reflect.Value representing the results of the generator function call.
 func callBackingFunction(ctx context.Context, args []reflect.Value, cacheKey string, state *cacheState) []reflect.Value {
-	// If we added a context, then it'll be at the end. Remove it if we added it.
-	funcArgs := args
-	if !state.hasContext {
-		funcArgs = funcArgs[:len(funcArgs)-1]
-	}
-	results := state.baseGenerator.Call(funcArgs)
+	results := state.baseGenerator.Call(args)
 
 	cacheVals := make([]any, 0)
 
@@ -536,7 +543,7 @@ func generatorReturnTypesKey(resultTypes []reflect.Type) string {
 
 // generatorParamKeys returns a string that represents the parameters
 // of the generator function.
-func generatorParamKeys(args []reflect.Value) string {
+func generatorParamKeys(args []reflect.Value) (string, error) {
 	builder := strings.Builder{}
 	for _, arg := range args {
 		if arg.CanConvert(contextType) {
@@ -546,42 +553,39 @@ func generatorParamKeys(args []reflect.Value) string {
 			builder.WriteString(":")
 		}
 		val := arg.Interface()
-		if keyable, ok := val.(Keyable); ok {
-			builder.WriteString(keyable.CacheKey())
-		} else if provider, ok := cacheKeyProviders[arg.Type()]; ok {
-			bytes, err := provider(val)
-			if err != nil {
-				log.Printf("Error generating cache key: %v\n", err)
-				builder.WriteString(arg.Type().Elem().Name())
-			} else {
-				builder.WriteString(string(bytes))
-			}
-		} else if stringer, ok := val.(fmt.Stringer); ok {
-			builder.WriteString(stringer.String())
-		} else {
-			done := false
+
+		keyProvider, ok := cacheKeyProviders[arg.Type()]
+		if !ok {
 			for iface, f := range cacheKeyInterfaceProviders {
 				if arg.Type().Implements(iface) {
-					bytes, err := f(val)
-					if err != nil {
-						continue
-					}
-					builder.WriteString(string(bytes))
-					done = true
+					keyProvider = f
 					break
 				}
 			}
-			if !done {
-				valJson, err := json.Marshal(val)
-				if err != nil || string(valJson) == "{}" {
-					builder.WriteString(arg.Type().Elem().Name())
-				} else {
-					builder.Write(valJson)
-				}
+		}
+		if keyProvider != nil {
+			bytes, err := keyProvider(val)
+			if err != nil {
+				return "", err
+			}
+			builder.WriteString(string(bytes))
+		} else if keyable, ok := val.(Keyable); ok {
+			builder.WriteString(keyable.CacheKey())
+		} else if stringer, ok := val.(fmt.Stringer); ok {
+			builder.WriteString(stringer.String())
+		} else {
+			valJson, err := json.Marshal(val)
+			if err != nil {
+				return "", err
+			}
+			if string(valJson) == "{}" {
+				builder.WriteString(arg.Type().Elem().Name())
+			} else {
+				builder.Write(valJson)
 			}
 		}
 	}
-	return builder.String()
+	return builder.String(), nil
 }
 
 // DefaultDurationProvider is a CacheDurationProvider that returns the

@@ -277,7 +277,7 @@ func Test_Cache_NonKeyed_BadJSON(t *testing.T) {
 
 	ctx := NewDependencyContext(context.Background(), input, Cached(&cache, generator, time.Minute))
 	ov := Get[*outputValue](ctx)
-	assert.Contains(t, cache.values, "recursive//outputValue")
+	assert.NotContains(t, cache.values, "recursive//outputValue")
 	assert.Equal(t, "42", ov.Value)
 }
 
@@ -580,7 +580,6 @@ func Test_handlePreRefresh_HappyCase(t *testing.T) {
 
 	args := []reflect.Value{
 		reflect.ValueOf("test"),
-		reflect.ValueOf(ctx),
 	}
 
 	handlePreRefresh(ctx, cacheKey, state, args, savedTime, ttl)
@@ -644,7 +643,6 @@ func Test_handlePreRefresh_Panics(t *testing.T) {
 
 	args := []reflect.Value{
 		reflect.ValueOf("test"),
-		reflect.ValueOf(ctx),
 	}
 
 	// The function panics, but the panic is caught and the function continues.
