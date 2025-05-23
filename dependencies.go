@@ -269,7 +269,7 @@ func (d *DependencyContext) findApplicableSlot(target any) (*slot, reflect.Type,
 	d.slots.Range(func(slotTargetA, sa any) bool {
 		slotTarget = slotTargetA.(reflect.Type)
 		s = sa.(*slot)
-		if requestedType.Kind() == reflect.Interface && slotTarget.AssignableTo(requestedType) {
+		if requestedType.Kind() == reflect.Interface && canAssign(slotTarget, requestedType) {
 			// Create a new reference to this slot showing that this slot is assignable
 			// to the target. Essentially this caches the slow lookup of the `AssignableTo`
 			// check we just did. This is safe because the slot is still the same slot with

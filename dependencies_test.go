@@ -484,3 +484,58 @@ func Test_ParentContextOverride_error(t *testing.T) {
 		NewDependencyContext(context.Background(), &testDoodad{Val: "wo0t"}, rootCtx)
 	})
 }
+
+func Test_OptionsPattern_WithOverrides(t *testing.T) {
+	widgetA := &testWidget{Val: 23}
+	widgetB := &testWidget{Val: 42}
+
+	// Test that WithOverrides() allows overriding
+	ctx := NewDependencyContext(context.Background(), WithOverrides(), widgetA, widgetB)
+	widget := Get[*testWidget](ctx)
+	assert.Equal(t, 42, widget.Val)
+
+	// Test that it behaves the same as NewLooseDependencyContext
+	ctxLoose := NewLooseDependencyContext(context.Background(), widgetA, widgetB)
+	widgetLoose := Get[*testWidget](ctxLoose)
+	assert.Equal(t, widget.Val, widgetLoose.Val)
+}
+
+func Test_OptionsPattern_MixedArgs(t *testing.T) {
+	widget := &testWidget{Val: 42}
+	doodad := &testDoodad{Val: "test"}
+	gen := func() *testImpl { return &testImpl{val: 100} }
+
+	// Test mixing options and dependencies in any order
+	ctx := NewDependencyContext(context.Background(), widget, WithOverrides(), doodad, gen)
+
+	// Verify all dependencies are available
+	assert.Equal(t, 42, Get[*testWidget](ctx).Val)
+	assert.Equal(t, "test", Get[*testDoodad](ctx).Val)
+	assert.Equal(t, 100, Get[*testImpl](ctx).val)
+}
+
+func Test_OptionsPattern_OverrideGenerators(t *testing.T) {
+	genA := func() *testWidget { return &testWidget{Val: 23} }
+	genB := func() *testWidget { return &testWidget{Val: 42} }
+	widgetC := &testWidget{Val: 105}
+
+	// Test generator override with WithOverrides option
+	ctx := NewDependencyContext(context.Background(), WithOverrides(), genA, genB)
+	widget := Get[*testWidget](ctx)
+	assert.Equal(t, 42, widget.Val)
+
+	// Test concrete value overrides generator
+	ctx = NewDependencyContext(context.Background(), WithOverrides(), genA, widgetC)
+	widget = Get[*testWidget](ctx)
+	assert.Equal(t, 105, widget.Val)
+}
+
+func Test_OptionsPattern_StrictByDefault(t *testing.T) {
+	widgetA := &testWidget{Val: 23}
+	widgetB := &testWidget{Val: 42}
+
+	// Test that without WithOverrides, it still panics
+	assert.Panics(t, func() {
+		NewDependencyContext(context.Background(), widgetA, widgetB)
+	})
+}

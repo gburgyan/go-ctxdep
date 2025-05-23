@@ -23,18 +23,54 @@ const (
 
 var EnableTiming = TimingDisable
 
+// ContextOption is a functional option for configuring a DependencyContext.
+type ContextOption func(*DependencyContext)
+
+// WithOverrides allows dependencies to override existing ones. When this option is used,
+// if there are multiple dependencies that can fill a slot, the last concrete slot value
+// will be used. In case there is no concrete value, the last generator will win.
+// This is useful for testing scenarios where you want to override specific dependencies.
+func WithOverrides() ContextOption {
+	return func(dc *DependencyContext) {
+		dc.loose = true
+	}
+}
+
 // NewDependencyContext adds a new dependency context to the context stack and returns
 // the new context. It also adds any dependencies that are also passed in to the new
 // dependency context. For a further discussion on what dependencies do and how
-// they work, look at the documentation for DependencyContext. This applies strict
-// evaluation and will not allow multiple dependencies to ever fill a slot. If there
-// are multiple concrete types or generators can can fill a slot, this function
-// will `panic`.
-func NewDependencyContext(ctx context.Context, dependencies ...any) context.Context {
+// they work, look at the documentation for DependencyContext.
+//
+// By default, this applies strict evaluation and will not allow multiple dependencies
+// to ever fill a slot. If there are multiple concrete types or generators that can
+// fill a slot, this function will `panic`. Use WithOverrides() option to allow
+// overriding existing dependencies.
+//
+// Options and dependencies can be mixed in any order. Options are applied first,
+// then dependencies are added.
+func NewDependencyContext(ctx context.Context, args ...any) context.Context {
 	dc := &DependencyContext{
 		parentContext: ctx,
 		slots:         sync.Map{},
 	}
+
+	// Separate options from dependencies
+	var options []ContextOption
+	var dependencies []any
+
+	for _, arg := range args {
+		if opt, ok := arg.(ContextOption); ok {
+			options = append(options, opt)
+		} else {
+			dependencies = append(dependencies, arg)
+		}
+	}
+
+	// Apply options
+	for _, opt := range options {
+		opt(dc)
+	}
+
 	newContext := context.WithValue(ctx, dependencyContextKey, dc)
 	dc.selfContext = newContext
 	dc.addDependenciesAndInitialize(newContext, dependencies...)
@@ -48,16 +84,10 @@ func NewDependencyContext(ctx context.Context, dependencies ...any) context.Cont
 // NewDependencyContext except that it allows for overrides of existing dependencies. In case
 // there are multiple dependencies that can fill a slot, the last concrete slot value will
 // be used. In case there is no concrete value, the last generator will win.
+//
+// Deprecated: Use NewDependencyContext with WithOverrides() option instead.
 func NewLooseDependencyContext(ctx context.Context, dependencies ...any) context.Context {
-	dc := &DependencyContext{
-		parentContext: ctx,
-		slots:         sync.Map{},
-		loose:         true,
-	}
-	newContext := context.WithValue(ctx, dependencyContextKey, dc)
-	dc.selfContext = newContext
-	dc.addDependenciesAndInitialize(newContext, dependencies...)
-	return newContext
+	return NewDependencyContext(ctx, append([]any{WithOverrides()}, dependencies...)...)
 }
 
 // GetDependencyContext finds a DependencyContext in the context stack and returns it.

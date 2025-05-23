@@ -484,9 +484,22 @@ This is an edge case that is _not_ handled. If a type is requested but is not pr
 
 The default behaviour of the context dependencies is that if multiple dependencies are present, either for concrete values or generators, the construction of the context will `panic`. This is to follow the "fail fast" mindset since there likely is a bug in specifying what is going to be in the context. This will surface that issue quickly.
 
-Thile this is generally fine for production code, but it can cause annoyance when writing tests. There are cases where you have a default set of common dependencies, but for *this test* you need to have something else to test a use case. The `NewLooseDependencyContext` is provided to account for this.
+While this is generally fine for production code, it can cause annoyance when writing tests. There are cases where you have a default set of common dependencies, but for *this test* you need to have something else to test a use case. The `WithOverrides()` option is provided to account for this.
 
-When constructing a context "loosely," you can freely override concrete values and generators; the last one added will be used. In case that there are both generators and concrete values, the last value will be used; a generator will never override a value.
+```Go
+// This will panic because two values fill the same slot
+ctx := ctxdep.NewDependencyContext(ctx, widgetA, widgetB)
+
+// This allows overriding - widgetB will be used
+ctx := ctxdep.NewDependencyContext(ctx, ctxdep.WithOverrides(), widgetA, widgetB)
+
+// Options and dependencies can be mixed in any order
+ctx := ctxdep.NewDependencyContext(ctx, widgetA, ctxdep.WithOverrides(), widgetB)
+```
+
+When constructing a context with `WithOverrides()`, you can freely override concrete values and generators; the last one added will be used. In case that there are both generators and concrete values, the last value will be used; a generator will never override a value.
+
+For backward compatibility, `NewLooseDependencyContext` is still available but is deprecated in favor of using `NewDependencyContext` with `WithOverrides()`.
 
 ## Overriding the parent context
 

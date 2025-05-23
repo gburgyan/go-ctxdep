@@ -305,17 +305,21 @@ func makeStateForGenerator(cache Cache, generator any, opts CtxCacheOptions) *ca
 	// Get this for later when we have to call it
 	baseGenerator := reflect.ValueOf(generator)
 
+	// Use cached type info
+	typeInfo := getTypeInfo(genType)
+
 	// Controls if we need to add a context parameter to the generator
 	hasContext := false
 
-	// Gather the input and output types
-	inTypes := make([]reflect.Type, genType.NumIn())
-	for i := 0; i < genType.NumIn(); i++ {
-		in := genType.In(i)
-		if in.ConvertibleTo(contextType) {
+	// Check if any parameter is convertible to context
+	inTypes := make([]reflect.Type, len(typeInfo.funcParams))
+	copy(inTypes, typeInfo.funcParams)
+
+	for _, paramType := range typeInfo.funcParams {
+		if paramType.ConvertibleTo(contextType) {
 			hasContext = true
+			break
 		}
-		inTypes[i] = in
 	}
 
 	// If the generator does not take a context, add one. We'll remove
@@ -328,6 +332,7 @@ func makeStateForGenerator(cache Cache, generator any, opts CtxCacheOptions) *ca
 		inTypes = append(inTypes, contextType)
 	}
 
+	// Copy output types including error
 	outTypes := make([]reflect.Type, genType.NumOut())
 	for i := 0; i < genType.NumOut(); i++ {
 		outTypes[i] = genType.Out(i)
@@ -569,19 +574,24 @@ func generatorParamKeys(args []reflect.Value) (string, error) {
 				return "", err
 			}
 			builder.WriteString(string(bytes))
-		} else if keyable, ok := val.(Keyable); ok {
-			builder.WriteString(keyable.CacheKey())
-		} else if stringer, ok := val.(fmt.Stringer); ok {
-			builder.WriteString(stringer.String())
 		} else {
-			valJson, err := json.Marshal(val)
-			if err != nil {
-				return "", err
-			}
-			if string(valJson) == "{}" {
-				builder.WriteString(arg.Type().Elem().Name())
+			// Use type cache to check interface implementation
+			typeInfo := getTypeInfo(arg.Type())
+			if typeInfo.implementsKeyable {
+				keyable := val.(Keyable)
+				builder.WriteString(keyable.CacheKey())
+			} else if stringer, ok := val.(fmt.Stringer); ok {
+				builder.WriteString(stringer.String())
 			} else {
-				builder.Write(valJson)
+				valJson, err := json.Marshal(val)
+				if err != nil {
+					return "", err
+				}
+				if string(valJson) == "{}" {
+					builder.WriteString(arg.Type().Elem().Name())
+				} else {
+					builder.Write(valJson)
+				}
 			}
 		}
 	}

@@ -17,26 +17,14 @@ func (d *DependencyContext) addGenerator(generatorFunction any, immediate *immed
 		panic("generator must be a function")
 	}
 
-	hasError := false
-	var resultTypes []reflect.Type
+	// Use cached type info for better performance
+	typeInfo := getTypeInfo(funcType)
 
-	for i := 0; i < funcType.NumOut(); i++ {
-		resultType := funcType.Out(i)
-		if resultType.AssignableTo(errorType) {
-			if hasError {
-				panic("multiple error results on a generator function not permitted")
-			}
-			hasError = true
-		} else {
-			resultTypes = append(resultTypes, resultType)
-		}
-	}
-
-	if len(resultTypes) == 0 {
+	if len(typeInfo.funcReturns) == 0 {
 		panic("generator must have at least one result value")
 	}
 
-	for _, resultType := range resultTypes {
+	for _, resultType := range typeInfo.funcReturns {
 		if existingSlotA, existing := d.slots.Load(resultType); existing {
 			existingSlot := existingSlotA.(*slot)
 			if !d.loose {
@@ -64,7 +52,8 @@ func (d *DependencyContext) addGenerator(generatorFunction any, immediate *immed
 // or it doesn't have an error, this returns nil.
 func (d *DependencyContext) getGeneratorError(results []reflect.Value) error {
 	for _, result := range results {
-		if result.Type().AssignableTo(errorType) && !result.IsNil() {
+		typeInfo := getTypeInfo(result.Type())
+		if typeInfo.assignableToError && !result.IsNil() {
 			return result.Convert(errorType).Interface().(error)
 		}
 	}
@@ -86,10 +75,10 @@ func (d *DependencyContext) invokeSlotGenerator(ctx context.Context, activeSlot 
 	}
 
 	genType := reflect.TypeOf(activeSlot.generator)
-	inCount := genType.NumIn()
-	params := make([]reflect.Value, inCount)
-	for i := 0; i < inCount; i++ {
-		inType := genType.In(i)
+	typeInfo := getTypeInfo(genType)
+	params := make([]reflect.Value, len(typeInfo.funcParams))
+
+	for i, inType := range typeInfo.funcParams {
 		if inType == contextType {
 			params[i] = reflect.ValueOf(sc)
 		} else {
