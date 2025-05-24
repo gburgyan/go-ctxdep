@@ -2,6 +2,7 @@ package ctxdep
 
 import (
 	"context"
+	"reflect"
 	"sync"
 )
 
@@ -33,6 +34,31 @@ type ContextOption func(*DependencyContext)
 func WithOverrides() ContextOption {
 	return func(dc *DependencyContext) {
 		dc.loose = true
+	}
+}
+
+// CleanupFunc represents a function that cleans up a dependency of type T.
+type CleanupFunc[T any] func(T)
+
+// WithCleanup enables cleanup functionality for the dependency context.
+// When the context is cancelled, dependencies implementing io.Closer will have their
+// Close() method called automatically. This must be called to enable any cleanup behavior.
+func WithCleanup() ContextOption {
+	return func(dc *DependencyContext) {
+		dc.cleanupEnabled = true
+	}
+}
+
+// WithCleanupFunc registers a custom cleanup function for dependencies of type T.
+// This automatically enables cleanup functionality if not already enabled.
+// The cleanup function will be called when the context is cancelled.
+// Custom cleanup functions take precedence over automatic io.Closer cleanup.
+func WithCleanupFunc[T any](cleanup CleanupFunc[T]) ContextOption {
+	return func(dc *DependencyContext) {
+		dc.cleanupEnabled = true
+		var zero T
+		cleanupType := reflect.TypeOf(&zero).Elem()
+		dc.cleanupFuncs.Store(cleanupType, cleanup)
 	}
 }
 
@@ -74,6 +100,12 @@ func NewDependencyContext(ctx context.Context, args ...any) context.Context {
 	newContext := context.WithValue(ctx, dependencyContextKey, dc)
 	dc.selfContext = newContext
 	dc.addDependenciesAndInitialize(newContext, dependencies...)
+
+	// Set up cleanup monitoring only if enabled
+	if dc.cleanupEnabled {
+		go dc.monitorContextDone(newContext)
+	}
+
 	return newContext
 }
 
@@ -146,6 +178,31 @@ func GetWithError[T any](ctx context.Context) (T, error) {
 	var target T
 	err := dc.FillDependency(ctx, &target)
 	return target, err
+}
+
+// GetOptional returns the value of type T from the dependency context along with a boolean
+// indicating whether the dependency was found. Unlike Get, this function does not panic
+// if the dependency is not found.
+func GetOptional[T any](ctx context.Context) (T, bool) {
+	dc := GetDependencyContext(ctx)
+	var target T
+	err := dc.FillDependency(ctx, &target)
+	if err != nil {
+		return target, false
+	}
+	return target, true
+}
+
+// GetBatchOptional behaves like GetBatch but returns a slice of booleans indicating
+// which dependencies were successfully filled. It does not panic if dependencies are not found.
+func GetBatchOptional(ctx context.Context, target ...any) []bool {
+	dc := GetDependencyContext(ctx)
+	results := make([]bool, len(target))
+	for i, t := range target {
+		err := dc.FillDependency(ctx, t)
+		results[i] = err == nil
+	}
+	return results
 }
 
 // Status is a diagnostic tool that returns a string describing the state of the dependency

@@ -285,6 +285,80 @@ By initializing the cache by calling `CachedOpts`, you can enable some more adva
 
 Even if multiple clients of the cache trigger a potential refresh, only a single refresh will occur.
 
+## Lifecycle management
+
+Dependencies can have cleanup functions that are automatically called when the context is cancelled. This is particularly useful for resources that need to be cleaned up like database connections, file handles, or network connections. This feature is opt-in and must be explicitly enabled using `WithCleanup()` or `WithCleanupFunc()`.
+
+### Automatic cleanup for io.Closer
+
+Any dependency that implements the `io.Closer` interface will have its `Close()` method called when the context is cancelled, but only if cleanup is enabled:
+
+```Go
+type DatabaseConnection struct {
+    conn *sql.DB
+}
+
+func (dc *DatabaseConnection) Close() error {
+    return dc.conn.Close()
+}
+
+func main() {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel() // This will trigger cleanup
+    
+    dbConn := &DatabaseConnection{conn: openDB()}
+    ctx = ctxdep.NewDependencyContext(ctx, 
+        ctxdep.WithCleanup(), // Enable automatic cleanup
+        dbConn,
+    )
+    
+    // Use the database connection
+    // When cancel() is called, dbConn.Close() will be called automatically
+}
+```
+
+### Custom cleanup functions
+
+For more complex cleanup logic or types that don't implement `io.Closer`, you can register custom cleanup functions:
+
+```Go
+type Service struct {
+    workers []*Worker
+}
+
+func cleanupService(s *Service) {
+    for _, worker := range s.workers {
+        worker.Stop()
+    }
+    log.Println("Service cleaned up")
+}
+
+func main() {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    
+    service := &Service{workers: startWorkers()}
+    ctx = ctxdep.NewDependencyContext(ctx,
+        ctxdep.WithCleanupFunc(cleanupService),
+        service,
+    )
+    
+    // When cancel() is called, cleanupService will be invoked
+}
+```
+
+### Cleanup behavior
+
+- Cleanup must be explicitly enabled with `WithCleanup()` or `WithCleanupFunc()`
+- Cleanup functions are called exactly once, even if the context is cancelled multiple times
+- Cleanup happens asynchronously when the context is cancelled
+- Dependencies created by generators are also cleaned up
+- Nested contexts properly clean up their own dependencies
+- Custom cleanup functions take precedence over automatic `io.Closer` cleanup
+- Using `WithCleanupFunc()` automatically enables cleanup for all dependencies
+
+This opt-in design ensures zero overhead for applications that don't need cleanup functionality, while providing robust resource management for those that do.
+
 # Why all this is important
 
 Testing.
@@ -444,6 +518,43 @@ In case errors are returned, they will be of type `ctxdep.DependencyError`. The 
 
 Note, however, that this will still `panic` if the dependency context is not found. This is intentional as it grossly violates the preconditions for the call. A `panic` from a generator will still leak out as well.
 
+## Optional dependencies
+
+For cases where dependencies might not be present and you want to handle this gracefully without panicking, you can use the `GetOptional()` function:
+
+```Go
+func processWithOptionalCache(ctx context.Context) {
+    cache, found := ctxdep.GetOptional[*CacheService](ctx)
+    if found {
+        // Use cache for faster processing
+        result := cache.Get("key")
+        if result != nil {
+            return result
+        }
+    }
+    // Fall back to slower processing without cache
+    return computeExpensiveResult()
+}
+```
+
+This is particularly useful for:
+- Feature flags and optional services
+- Graceful degradation when certain services are unavailable
+- Testing scenarios where you want to test with and without certain dependencies
+
+There's also `GetBatchOptional()` which returns a slice of booleans indicating which dependencies were successfully found:
+
+```Go
+var cache *CacheService
+var logger *LogService
+var metrics *MetricsService
+
+results := ctxdep.GetBatchOptional(ctx, &cache, &logger, &metrics)
+// results[0] indicates if cache was found
+// results[1] indicates if logger was found
+// results[2] indicates if metrics was found
+```
+
 ## Getting multiple values from the context
 
 If you need multiple values from the dependency context, there is a `GetBatch()` and `GetBatchWithError()` where you can pass multiple pointers in to, and they will be filled in from the context:
@@ -495,6 +606,14 @@ ctx := ctxdep.NewDependencyContext(ctx, ctxdep.WithOverrides(), widgetA, widgetB
 
 // Options and dependencies can be mixed in any order
 ctx := ctxdep.NewDependencyContext(ctx, widgetA, ctxdep.WithOverrides(), widgetB)
+
+// Multiple options can be combined
+ctx := ctxdep.NewDependencyContext(ctx, 
+    ctxdep.WithOverrides(),
+    ctxdep.WithCleanup(),
+    widgetA, 
+    widgetB,
+)
 ```
 
 When constructing a context with `WithOverrides()`, you can freely override concrete values and generators; the last one added will be used. In case that there are both generators and concrete values, the last value will be used; a generator will never override a value.

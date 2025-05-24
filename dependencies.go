@@ -69,6 +69,16 @@ type DependencyContext struct {
 	// parentFixed controls if we are in a position to override the parent context. This
 	// is only usable by the first added dependency.
 	parentFixed bool
+
+	// cleanupEnabled controls whether cleanup functionality is enabled for this context
+	cleanupEnabled bool
+
+	// cleanupFuncs holds cleanup functions that will be called when the context is done.
+	// These are keyed by reflect.Type for the dependency they're associated with.
+	cleanupFuncs sync.Map
+
+	// cleanupOnce ensures cleanup is only performed once
+	cleanupOnce sync.Once
 }
 
 // slot stored the internal state of a dependency slot.
@@ -393,4 +403,43 @@ func (d *DependencyContext) parentDependencyContext() *DependencyContext {
 	}
 	// There should be no normal way to get to this point.
 	panic("unexpected context value of parent dependency context")
+}
+
+// monitorContextDone monitors when the context is done and triggers cleanup
+func (dc *DependencyContext) monitorContextDone(ctx context.Context) {
+	<-ctx.Done()
+	dc.performCleanup()
+}
+
+// performCleanup executes all registered cleanup functions
+func (dc *DependencyContext) performCleanup() {
+	if !dc.cleanupEnabled {
+		return
+	}
+
+	dc.cleanupOnce.Do(func() {
+		// First clean up our own dependencies
+		dc.slots.Range(func(key, value any) bool {
+			s := value.(*slot)
+			if s.value == nil {
+				return true
+			}
+
+			slotType := key.(reflect.Type)
+
+			// Check if there's a custom cleanup function
+			if cleanupFunc, ok := dc.cleanupFuncs.Load(slotType); ok {
+				// We need to call the cleanup function with the correct type
+				cleanupValue := reflect.ValueOf(cleanupFunc)
+				valueToClean := reflect.ValueOf(s.value)
+				cleanupValue.Call([]reflect.Value{valueToClean})
+			} else {
+				// Check if the value implements io.Closer
+				if closer, ok := s.value.(interface{ Close() error }); ok {
+					_ = closer.Close()
+				}
+			}
+			return true
+		})
+	})
 }
