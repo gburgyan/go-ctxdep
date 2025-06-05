@@ -6,6 +6,7 @@ import (
 	"github.com/gburgyan/go-timing"
 	"reflect"
 	"sync"
+	"time"
 )
 
 type key int
@@ -79,6 +80,9 @@ type DependencyContext struct {
 
 	// cleanupOnce ensures cleanup is only performed once
 	cleanupOnce sync.Once
+
+	// validators holds validation functions that will be run during context initialization
+	validators []any
 }
 
 // slot stored the internal state of a dependency slot.
@@ -89,8 +93,8 @@ type slot struct {
 	lock      sync.Mutex
 	immediate *immediateDependencies
 	status    SlotStatus
-	// For factories, store the original function for diagnostics
-	factoryOriginal any
+	// For adapters, store the original function for diagnostics
+	adapterOriginal any
 }
 
 type SlotStatus int
@@ -99,7 +103,7 @@ const (
 	StatusDirect     SlotStatus = iota // directly set dependency
 	StatusGenerator                    // a generator ran to create this dependency
 	StatusFromParent                   // imported from a parent dependency context (optimization)
-	StatusFactory                      // a factory function that was processed
+	StatusAdapter                      // an adapted function that was processed
 )
 
 var errorType = reflect.TypeOf((*error)(nil)).Elem()
@@ -109,26 +113,50 @@ var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 // all the dependencies passed in and treat them as a generator if it's a function or
 // a direct dependency if it's not. Validation is done to ensure that any generators that
 // have been added to the context have parameters that can be resolved by the context. If
-// there are unresolved dependencies, this will panic.
+// there are unresolved dependencies, this will return an error.
 //
 // After adding the dependencies to the context, any immediate dependencies will be resolved.
-func (d *DependencyContext) addDependenciesAndInitialize(ctx context.Context, deps ...any) {
+// If validation is enabled (by including Validate() functions), they will be run before
+// processing adapters and immediate dependencies.
+func (d *DependencyContext) addDependenciesAndInitialize(ctx context.Context, deps ...any) error {
 	d.addDependencies(deps, nil)
-	d.validateDependencies()
-	d.processFactories()
+	if err := d.validateDependenciesWithError(); err != nil {
+		return err
+	}
+
+	// Process adapters first so they're available for validators
+	d.processAdapters()
+
+	// Run validators if any were registered
+	if err := d.runValidators(ctx); err != nil {
+		return err
+	}
+
 	d.resolveImmediateDependencies(ctx)
+	return nil
 }
 
 // validateDependencies ensures that everything that was added is in a consistent state. If
 // any dependencies exist that can't be fulfilled, this will `panic`.
 func (d *DependencyContext) validateDependencies() {
+	if err := d.validateDependenciesWithError(); err != nil {
+		panic(err.Error())
+	}
+}
+
+// validateDependenciesWithError ensures that everything that was added is in a consistent state. If
+// any dependencies exist that can't be fulfilled, this will return an error.
+func (d *DependencyContext) validateDependenciesWithError() error {
+	var validationErr error
 	d.slots.Range(func(_, sa any) bool {
 		s := sa.(*slot)
 		if !d.isSlotValid(s) {
-			panic(fmt.Sprintf("generator for %s has dependencies that cannot be resolved", formatGeneratorDebug(s.generator)))
+			validationErr = fmt.Errorf("generator for %s has dependencies that cannot be resolved", formatGeneratorDebug(s.generator))
+			return false
 		}
 		return true
 	})
+	return validationErr
 }
 
 // addDependencies adds the given dependencies to the context. This will add all the deps
@@ -151,10 +179,14 @@ func (d *DependencyContext) addDependencies(deps []any, immediate *immediateDepe
 		if immediateWrapper, ok := dep.(*immediateDependencies); ok {
 			d.parentFixed = true
 			d.addDependencies(immediateWrapper.dependencies, immediateWrapper)
-		} else if fw, ok := dep.(*factoryWrapper); ok {
+		} else if aw, ok := dep.(*adaptWrapper); ok {
 			d.parentFixed = true
-			// Store the factory wrapper temporarily, will be processed later
-			d.addValue(fw.targetType, fw)
+			// Store the adapter wrapper temporarily, will be processed later
+			d.addValue(aw.targetType, aw)
+		} else if vw, ok := dep.(*validatorWrapper); ok {
+			d.parentFixed = true
+			// Add validator to the validators slice
+			d.validators = append(d.validators, vw)
 		} else if subSlice, ok := dep.([]any); ok {
 			d.addDependencies(subSlice, immediate)
 			d.parentFixed = true
@@ -413,12 +445,6 @@ func (d *DependencyContext) parentDependencyContext() *DependencyContext {
 	panic("unexpected context value of parent dependency context")
 }
 
-// monitorContextDone monitors when the context is done and triggers cleanup
-func (dc *DependencyContext) monitorContextDone(ctx context.Context) {
-	<-ctx.Done()
-	dc.performCleanup()
-}
-
 // performCleanup executes all registered cleanup functions
 func (dc *DependencyContext) performCleanup() {
 	if !dc.cleanupEnabled {
@@ -450,4 +476,48 @@ func (dc *DependencyContext) performCleanup() {
 			return true
 		})
 	})
+}
+
+// Cleanup performs cleanup on all dependencies in the context that have cleanup functions
+// or implement io.Closer. This should be called when you're done using the dependencies,
+// typically with defer:
+//
+//	ctx := ctxdep.NewDependencyContext(ctx, WithCleanup(), deps...)
+//	defer ctx.Cleanup()
+//
+// The cleanup is performed in the reverse order of dependency creation, and each cleanup
+// is done synchronously. If cleanup was not enabled with WithCleanup() or WithCleanupFunc(),
+// this function does nothing.
+//
+// This method is safe to call multiple times - cleanup will only happen once.
+func (dc *DependencyContext) Cleanup() {
+	dc.performCleanup()
+}
+
+// Deadline returns the time when work done on behalf of this context
+// should be canceled. It delegates to the parent context.
+func (d *DependencyContext) Deadline() (deadline time.Time, ok bool) {
+	return d.parentContext.Deadline()
+}
+
+// Done returns a channel that's closed when work done on behalf of this
+// context should be canceled. It delegates to the parent context.
+func (d *DependencyContext) Done() <-chan struct{} {
+	return d.parentContext.Done()
+}
+
+// Err returns a non-nil error value after Done is closed. It delegates
+// to the parent context.
+func (d *DependencyContext) Err() error {
+	return d.parentContext.Err()
+}
+
+// Value returns the value associated with this context for key. For the
+// dependencyContextKey, it returns this DependencyContext. For all other
+// keys, it delegates to the parent context.
+func (d *DependencyContext) Value(key any) any {
+	if key == dependencyContextKey {
+		return d
+	}
+	return d.parentContext.Value(key)
 }

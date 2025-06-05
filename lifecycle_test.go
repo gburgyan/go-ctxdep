@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
 )
 
 type TestCloser struct {
@@ -25,41 +24,35 @@ func (tc *TestCloser) IsClosed() bool {
 	return tc.closed
 }
 
-func TestAutoCloseOnContextDone(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+func TestExplicitCleanup(t *testing.T) {
+	ctx := context.Background()
 
 	closer := &TestCloser{}
-	ctx = NewDependencyContext(ctx, WithCleanup(), closer)
+	dc := NewDependencyContext(ctx, WithCleanup(), closer)
 
 	// Verify it's not closed yet
 	if closer.IsClosed() {
 		t.Error("closer should not be closed yet")
 	}
 
-	// Cancel the context
-	cancel()
-
-	// Give cleanup goroutine time to run
-	time.Sleep(100 * time.Millisecond)
+	// Explicitly call cleanup
+	dc.Cleanup()
 
 	// Verify it's closed
 	if !closer.IsClosed() {
-		t.Error("closer should be closed after context cancellation")
+		t.Error("closer should be closed after explicit cleanup")
 	}
 }
 
 func TestNoCleanupWithoutOption(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := context.Background()
 
 	closer := &TestCloser{}
 	// Note: NOT using WithCleanup()
-	ctx = NewDependencyContext(ctx, closer)
+	dc := NewDependencyContext(ctx, closer)
 
-	// Cancel the context
-	cancel()
-
-	// Give time for cleanup (which shouldn't happen)
-	time.Sleep(100 * time.Millisecond)
+	// Call cleanup
+	dc.Cleanup()
 
 	// Verify it's NOT closed
 	if closer.IsClosed() {
@@ -68,7 +61,7 @@ func TestNoCleanupWithoutOption(t *testing.T) {
 }
 
 func TestCustomCleanupFunction(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := context.Background()
 
 	type CustomResource struct {
 		cleaned bool
@@ -85,16 +78,13 @@ func TestCustomCleanupFunction(t *testing.T) {
 		cleanupCalled = true
 	}
 
-	ctx = NewDependencyContext(ctx,
+	dc := NewDependencyContext(ctx,
 		WithCleanupFunc(cleanup),
 		resource,
 	)
 
-	// Cancel the context
-	cancel()
-
-	// Give cleanup goroutine time to run
-	time.Sleep(100 * time.Millisecond)
+	// Explicitly call cleanup
+	dc.Cleanup()
 
 	// Verify cleanup was called
 	if !cleanupCalled {
@@ -111,7 +101,7 @@ func TestCustomCleanupFunction(t *testing.T) {
 }
 
 func TestCleanupOnlyOnce(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := context.Background()
 
 	cleanupCount := 0
 	var mu sync.Mutex
@@ -125,17 +115,14 @@ func TestCleanupOnlyOnce(t *testing.T) {
 	}
 
 	resource := &CountedResource{}
-	ctx = NewDependencyContext(ctx,
+	dc := NewDependencyContext(ctx,
 		WithCleanupFunc(cleanup),
 		resource,
 	)
 
-	// Cancel multiple times
-	cancel()
-	cancel()
-
-	// Give cleanup goroutine time to run
-	time.Sleep(100 * time.Millisecond)
+	// Call cleanup multiple times
+	dc.Cleanup()
+	dc.Cleanup()
 
 	mu.Lock()
 	count := cleanupCount
@@ -147,7 +134,7 @@ func TestCleanupOnlyOnce(t *testing.T) {
 }
 
 func TestMultipleResourcesCleanup(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := context.Background()
 
 	type Closer1 struct {
 		TestCloser
@@ -172,7 +159,7 @@ func TestMultipleResourcesCleanup(t *testing.T) {
 		r.cleaned = true
 	}
 
-	ctx = NewDependencyContext(ctx,
+	dc := NewDependencyContext(ctx,
 		WithCleanup(), // Enable cleanup for io.Closer types
 		WithCleanupFunc(cleanupOther),
 		closer1,
@@ -180,11 +167,8 @@ func TestMultipleResourcesCleanup(t *testing.T) {
 		other,
 	)
 
-	// Cancel the context
-	cancel()
-
-	// Give cleanup goroutine time to run
-	time.Sleep(100 * time.Millisecond)
+	// Explicitly call cleanup
+	dc.Cleanup()
 
 	// Verify all resources were cleaned up
 	if !closer1.IsClosed() {
@@ -204,7 +188,7 @@ func TestMultipleResourcesCleanup(t *testing.T) {
 }
 
 func TestGeneratedDependencyCleanup(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := context.Background()
 
 	generatedCloser := &TestCloser{}
 
@@ -212,16 +196,13 @@ func TestGeneratedDependencyCleanup(t *testing.T) {
 		return generatedCloser
 	}
 
-	ctx = NewDependencyContext(ctx, WithCleanup(), generator)
+	dc := NewDependencyContext(ctx, WithCleanup(), generator)
 
 	// Trigger generation
-	_ = Get[*TestCloser](ctx)
+	_ = Get[*TestCloser](dc)
 
-	// Cancel the context
-	cancel()
-
-	// Give cleanup goroutine time to run
-	time.Sleep(100 * time.Millisecond)
+	// Explicitly call cleanup
+	dc.Cleanup()
 
 	// Verify generated dependency was cleaned up
 	if !generatedCloser.IsClosed() {
@@ -230,34 +211,89 @@ func TestGeneratedDependencyCleanup(t *testing.T) {
 }
 
 func TestNestedContextCleanup(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := context.Background()
 
 	parentCloser := &TestCloser{}
 	childCloser := &TestCloser{}
 
 	// Create parent context
-	ctx = NewDependencyContext(ctx, WithCleanup(), parentCloser)
+	parentCtx := NewDependencyContext(ctx, WithCleanup(), parentCloser)
 
 	// Create child context
-	childCtx := NewDependencyContext(ctx, WithCleanup(), childCloser)
+	childCtx := NewDependencyContext(parentCtx, WithCleanup(), childCloser)
 
-	// Cancel the parent context
-	cancel()
+	// Cleanup child first
+	childCtx.Cleanup()
 
-	// Give cleanup goroutines time to run
-	time.Sleep(100 * time.Millisecond)
-
-	// Both should be cleaned up
-	if !parentCloser.IsClosed() {
-		t.Error("parent closer should be closed")
+	// Only child should be cleaned up
+	if parentCloser.IsClosed() {
+		t.Error("parent closer should not be closed yet")
 	}
 	if !childCloser.IsClosed() {
 		t.Error("child closer should be closed")
+	}
+
+	// Cleanup parent
+	parentCtx.Cleanup()
+
+	// Now parent should be cleaned up
+	if !parentCloser.IsClosed() {
+		t.Error("parent closer should be closed")
 	}
 
 	// Ensure we can still use childCtx for retrieval even after cleanup
 	retrieved := Get[*TestCloser](childCtx)
 	if retrieved != childCloser {
 		t.Error("should still be able to retrieve from child context")
+	}
+}
+
+func TestDeferCleanupPattern(t *testing.T) {
+	// This test demonstrates the recommended pattern
+	testFunc := func() (closed bool) {
+		ctx := context.Background()
+		closer := &TestCloser{}
+
+		dc := NewDependencyContext(ctx, WithCleanup(), closer)
+		defer dc.Cleanup()
+
+		// Use the dependencies
+		retrieved := Get[*TestCloser](dc)
+		if retrieved != closer {
+			t.Error("failed to retrieve dependency")
+		}
+
+		// When function returns, cleanup will be called
+		return closer.IsClosed()
+	}
+
+	// Before function returns, should not be closed
+	closed := testFunc()
+
+	// After function returns (and defer runs), should be closed
+	if closed {
+		t.Error("resource should have been closed by defer")
+	}
+
+	// Need to check the closer after the function returns
+	// Let's modify this test to be more clear
+	closer := &TestCloser{}
+	func() {
+		ctx := context.Background()
+		dc := NewDependencyContext(ctx, WithCleanup(), closer)
+		defer dc.Cleanup()
+
+		// Use the dependencies
+		_ = Get[*TestCloser](dc)
+
+		// Should not be closed yet
+		if closer.IsClosed() {
+			t.Error("resource should not be closed before function returns")
+		}
+	}()
+
+	// After function returns, should be closed
+	if !closer.IsClosed() {
+		t.Error("resource should be closed after defer cleanup")
 	}
 }

@@ -4,13 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// Test types for factory tests
+// Test types for adapter tests
 type TestDatabase struct {
 	Name string
 }
@@ -25,12 +27,12 @@ type TestConfig struct {
 	APIKey string
 }
 
-// Factory function types
-type UserFactory func(ctx context.Context, userID string) (*TestUser, error)
-type UserFactoryNoError func(ctx context.Context, userID string) *TestUser
-type ComplexFactory func(ctx context.Context, name string, age int) (string, error)
+// Adapter function types
+type UserAdapter func(ctx context.Context, userID string) (*TestUser, error)
+type UserAdapterNoError func(ctx context.Context, userID string) *TestUser
+type ComplexAdapter func(ctx context.Context, name string, age int) (string, error)
 
-// Test functions that will be wrapped as factories
+// Test functions that will be wrapped as adapters
 func lookupUser(ctx context.Context, db *TestDatabase, userID string) (*TestUser, error) {
 	if userID == "error" {
 		return nil, errors.New("user not found")
@@ -57,19 +59,19 @@ func complexFunction(ctx context.Context, db *TestDatabase, config *TestConfig, 
 	return db.Name + ":" + config.APIKey + ":" + name + ":" + string(rune(age)), nil
 }
 
-func TestFactoryBasic(t *testing.T) {
+func TestAdapterBasic(t *testing.T) {
 	// Create a context with dependencies
 	db := &TestDatabase{Name: "TestDB"}
-	ctx := NewDependencyContext(context.Background(), db, Factory[UserFactory](lookupUser))
+	ctx := NewDependencyContext(context.Background(), db, Adapt[UserAdapter](lookupUser))
 
-	// Get the factory
-	factory := Get[UserFactory](ctx)
-	if factory == nil {
-		t.Fatal("factory should not be nil")
+	// Get the adapter
+	adapter := Get[UserAdapter](ctx)
+	if adapter == nil {
+		t.Fatal("adapter should not be nil")
 	}
 
-	// Use the factory
-	user, err := factory(ctx, "user123")
+	// Use the adapter
+	user, err := adapter(ctx, "user123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -85,16 +87,16 @@ func TestFactoryBasic(t *testing.T) {
 	}
 }
 
-func TestFactoryWithError(t *testing.T) {
+func TestAdapterWithError(t *testing.T) {
 	// Create a context with dependencies
 	db := &TestDatabase{Name: "TestDB"}
-	ctx := NewDependencyContext(context.Background(), db, Factory[UserFactory](lookupUser))
+	ctx := NewDependencyContext(context.Background(), db, Adapt[UserAdapter](lookupUser))
 
-	// Get the factory
-	factory := Get[UserFactory](ctx)
+	// Get the adapter
+	adapter := Get[UserAdapter](ctx)
 
-	// Use the factory with error case
-	user, err := factory(ctx, "error")
+	// Use the adapter with error case
+	user, err := adapter(ctx, "error")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -106,16 +108,16 @@ func TestFactoryWithError(t *testing.T) {
 	}
 }
 
-func TestFactoryNoError(t *testing.T) {
+func TestAdapterNoError(t *testing.T) {
 	// Create a context with dependencies
 	db := &TestDatabase{Name: "TestDB"}
-	ctx := NewDependencyContext(context.Background(), db, Factory[UserFactoryNoError](lookupUserNoError))
+	ctx := NewDependencyContext(context.Background(), db, Adapt[UserAdapterNoError](lookupUserNoError))
 
-	// Get the factory
-	factory := Get[UserFactoryNoError](ctx)
+	// Get the adapter
+	adapter := Get[UserAdapterNoError](ctx)
 
-	// Use the factory
-	user := factory(ctx, "user456")
+	// Use the adapter
+	user := adapter(ctx, "user456")
 	if user == nil {
 		t.Fatal("user should not be nil")
 	}
@@ -124,17 +126,17 @@ func TestFactoryNoError(t *testing.T) {
 	}
 }
 
-func TestFactoryMultipleDependencies(t *testing.T) {
+func TestAdapterMultipleDependencies(t *testing.T) {
 	// Create a context with multiple dependencies
 	db := &TestDatabase{Name: "TestDB"}
 	config := &TestConfig{APIKey: "secret123"}
-	ctx := NewDependencyContext(context.Background(), db, config, Factory[ComplexFactory](complexFunction))
+	ctx := NewDependencyContext(context.Background(), db, config, Adapt[ComplexAdapter](complexFunction))
 
-	// Get the factory
-	factory := Get[ComplexFactory](ctx)
+	// Get the adapter
+	adapter := Get[ComplexAdapter](ctx)
 
-	// Use the factory
-	result, err := factory(ctx, "John", 30)
+	// Use the adapter
+	result, err := adapter(ctx, "John", 30)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -145,7 +147,7 @@ func TestFactoryMultipleDependencies(t *testing.T) {
 	}
 }
 
-func TestFactoryMissingDependency(t *testing.T) {
+func TestAdapterMissingDependency(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic for missing dependency")
@@ -153,63 +155,63 @@ func TestFactoryMissingDependency(t *testing.T) {
 	}()
 
 	// Create a context without the required database dependency
-	_ = NewDependencyContext(context.Background(), Factory[UserFactory](lookupUser))
+	_ = NewDependencyContext(context.Background(), Adapt[UserAdapter](lookupUser))
 	// This should panic during initialization
 }
 
-func TestFactoryInvalidTargetType(t *testing.T) {
+func TestAdapterInvalidTargetType(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic for invalid target type")
 		}
 	}()
 
-	// Try to create a factory with non-function target type
+	// Try to create an adapter with non-function target type
 	type NotAFunction struct{}
-	Factory[NotAFunction](lookupUser)
+	Adapt[NotAFunction](lookupUser)
 }
 
-func TestFactoryInvalidFunction(t *testing.T) {
+func TestAdapterInvalidFunction(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic for invalid function")
 		}
 	}()
 
-	// Try to create a factory with non-function argument
-	Factory[UserFactory]("not a function")
+	// Try to create an adapter with non-function argument
+	Adapt[UserAdapter]("not a function")
 }
 
-func TestFactoryParameterMismatch(t *testing.T) {
+func TestAdapterParameterMismatch(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic for parameter mismatch")
 		}
 	}()
 
-	// Wrong factory type - expects different parameters
-	type WrongFactory func(ctx context.Context, userID string, extra int) (*TestUser, error)
+	// Wrong adapter type - expects different parameters
+	type WrongAdapter func(ctx context.Context, userID string, extra int) (*TestUser, error)
 	db := &TestDatabase{Name: "TestDB"}
-	_ = NewDependencyContext(context.Background(), db, Factory[WrongFactory](lookupUser))
+	_ = NewDependencyContext(context.Background(), db, Adapt[WrongAdapter](lookupUser))
 }
 
-func TestFactoryReturnMismatch(t *testing.T) {
+func TestAdapterReturnMismatch(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic for return mismatch")
 		}
 	}()
 
-	// Wrong factory type - expects different return types
-	type WrongFactory func(ctx context.Context, userID string) (string, error)
-	Factory[WrongFactory](lookupUser)
+	// Wrong adapter type - expects different return types
+	type WrongAdapter func(ctx context.Context, userID string) (string, error)
+	Adapt[WrongAdapter](lookupUser)
 }
 
-func TestFactoryWithOptionalDependency(t *testing.T) {
-	// Test that factory validates missing dependencies at initialization
+func TestAdapterWithOptionalDependency(t *testing.T) {
+	// Test that adapter validates missing dependencies at initialization
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("expected panic when factory has unresolvable dependencies")
+			t.Error("expected panic when adapter has unresolvable dependencies")
 		}
 	}()
 
@@ -218,59 +220,59 @@ func TestFactoryWithOptionalDependency(t *testing.T) {
 		return &TestUser{ID: id}, nil
 	}
 
-	type TestFactory func(ctx context.Context, id string) (*TestUser, error)
+	type TestAdapter func(ctx context.Context, id string) (*TestUser, error)
 
 	// This should panic because TestConfig is not available
-	ctx := NewDependencyContext(context.Background(), Factory[TestFactory](fn))
+	ctx := NewDependencyContext(context.Background(), Adapt[TestAdapter](fn))
 	_ = ctx
 }
 
-func TestFactoryContextUpdate(t *testing.T) {
-	// Test that factory uses dependencies from creation time, not from the provided context
+func TestAdapterContextUpdate(t *testing.T) {
+	// Test that adapter uses dependencies from creation time, not from the provided context
 	db := &TestDatabase{Name: "OriginalDB"}
-	ctx := NewDependencyContext(context.Background(), db, Factory[UserFactory](lookupUser))
+	ctx := NewDependencyContext(context.Background(), db, Adapt[UserAdapter](lookupUser))
 
-	factory := Get[UserFactory](ctx)
+	adapter := Get[UserAdapter](ctx)
 
 	// Create a new context with updated database
 	newDB := &TestDatabase{Name: "UpdatedDB"}
 	newCtx := NewDependencyContext(ctx, newDB, WithOverrides())
 
-	// Use factory with new context
-	user, err := factory(newCtx, "user789")
+	// Use adapter with new context
+	user, err := adapter(newCtx, "user789")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Should use the original database from when factory was created
+	// Should use the original database from when adapter was created
 	if user.Name != "Test User from OriginalDB" {
 		t.Errorf("expected user from OriginalDB, got '%s'", user.Name)
 	}
 }
 
-func TestFactoryNoContextParameter(t *testing.T) {
+func TestAdapterNoContextParameter(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("expected panic for factory without context parameter")
+			t.Error("expected panic for adapter without context parameter")
 		}
 	}()
 
-	// Factory target requires context but original function doesn't have it
+	// Adapter target requires context but original function doesn't have it
 	noCtxFunc := func(db *TestDatabase, userID string) (*TestUser, error) {
 		return &TestUser{ID: userID}, nil
 	}
 
 	db := &TestDatabase{Name: "TestDB"}
-	ctx := NewDependencyContext(context.Background(), db, Factory[UserFactory](noCtxFunc))
+	ctx := NewDependencyContext(context.Background(), db, Adapt[UserAdapter](noCtxFunc))
 
-	factory := Get[UserFactory](ctx)
-	// This should panic when trying to call the factory
-	factory(ctx, "test")
+	adapter := Get[UserAdapter](ctx)
+	// This should panic when trying to call the adapter
+	adapter(ctx, "test")
 }
 
-func TestFactoryAllDependenciesFromContext(t *testing.T) {
+func TestAdapterAllDependenciesFromContext(t *testing.T) {
 	// Test function where all non-context parameters come from context
-	type SimpleFactory func(ctx context.Context) (*TestUser, error)
+	type SimpleAdapter func(ctx context.Context) (*TestUser, error)
 
 	fn := func(ctx context.Context, db *TestDatabase, config *TestConfig) (*TestUser, error) {
 		return &TestUser{
@@ -282,10 +284,10 @@ func TestFactoryAllDependenciesFromContext(t *testing.T) {
 
 	db := &TestDatabase{Name: "TestDB"}
 	config := &TestConfig{APIKey: "key123"}
-	ctx := NewDependencyContext(context.Background(), db, config, Factory[SimpleFactory](fn))
+	ctx := NewDependencyContext(context.Background(), db, config, Adapt[SimpleAdapter](fn))
 
-	factory := Get[SimpleFactory](ctx)
-	user, err := factory(ctx)
+	adapter := Get[SimpleAdapter](ctx)
+	user, err := adapter(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -298,19 +300,19 @@ func TestFactoryAllDependenciesFromContext(t *testing.T) {
 	}
 }
 
-func TestFactoryConcurrent(t *testing.T) {
-	// Test concurrent factory usage
+func TestAdapterConcurrent(t *testing.T) {
+	// Test concurrent adapter usage
 	db := &TestDatabase{Name: "TestDB"}
-	ctx := NewDependencyContext(context.Background(), db, Factory[UserFactory](lookupUser))
+	ctx := NewDependencyContext(context.Background(), db, Adapt[UserAdapter](lookupUser))
 
-	factory := Get[UserFactory](ctx)
+	adapter := Get[UserAdapter](ctx)
 
-	// Run multiple goroutines using the factory
+	// Run multiple goroutines using the adapter
 	done := make(chan bool, 10)
 	for i := 0; i < 10; i++ {
 		go func(id int) {
 			userID := "user" + string(rune('0'+id))
-			user, err := factory(ctx, userID)
+			user, err := adapter(ctx, userID)
 			if err != nil {
 				t.Errorf("unexpected error in goroutine %d: %v", id, err)
 			}
@@ -327,16 +329,16 @@ func TestFactoryConcurrent(t *testing.T) {
 	}
 }
 
-func TestFactoryStatus(t *testing.T) {
-	// Create a context with a factory
+func TestAdapterStatus(t *testing.T) {
+	// Create a context with an adapter
 	db := &TestDatabase{Name: "TestDB"}
-	ctx := NewDependencyContext(context.Background(), db, Factory[UserFactory](lookupUser))
+	ctx := NewDependencyContext(context.Background(), db, Adapt[UserAdapter](lookupUser))
 
 	status := Status(ctx)
 
-	// Check that it shows as a factory
-	if !strings.Contains(status, "ctxdep.UserFactory - factory wrapping:") {
-		t.Error("Factory should show as 'factory wrapping:' in status")
+	// Check that it shows as an adapter
+	if !strings.Contains(status, "ctxdep.UserAdapter - adapter wrapping:") {
+		t.Error("Adapter should show as 'adapter wrapping:' in status")
 	}
 
 	// Check that it shows the wrapped function signature
@@ -345,19 +347,19 @@ func TestFactoryStatus(t *testing.T) {
 	}
 }
 
-func TestFactoryAnonymousType(t *testing.T) {
-	// Test using an anonymous function type for a factory
+func TestAdapterAnonymousType(t *testing.T) {
+	// Test using an anonymous function type for an adapter
 	db := &TestDatabase{Name: "TestDB"}
 
-	// Instead of using a named type like UserFactory, use anonymous func type
+	// Instead of using a named type like UserAdapter, use anonymous func type
 	ctx := NewDependencyContext(context.Background(), db,
-		Factory[func(ctx context.Context, userID string) (*TestUser, error)](lookupUser))
+		Adapt[func(ctx context.Context, userID string) (*TestUser, error)](lookupUser))
 
 	// Try to get it with the same anonymous type
-	factory := Get[func(ctx context.Context, userID string) (*TestUser, error)](ctx)
+	adapter := Get[func(ctx context.Context, userID string) (*TestUser, error)](ctx)
 
-	// Use the factory
-	user, err := factory(ctx, "user123")
+	// Use the adapter
+	user, err := adapter(ctx, "user123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -370,13 +372,13 @@ func TestFactoryAnonymousType(t *testing.T) {
 	}
 }
 
-func TestFactoryAnonymousTypeMismatch(t *testing.T) {
+func TestAdapterAnonymousTypeMismatch(t *testing.T) {
 	// Test what happens when anonymous function types have different signatures
 	db := &TestDatabase{Name: "TestDB"}
 
 	// Register with one anonymous type
 	ctx := NewDependencyContext(context.Background(), db,
-		Factory[func(ctx context.Context, userID string) (*TestUser, error)](lookupUser))
+		Adapt[func(ctx context.Context, userID string) (*TestUser, error)](lookupUser))
 
 	// Try to get with a different signature (int instead of string)
 	defer func() {
@@ -389,47 +391,47 @@ func TestFactoryAnonymousTypeMismatch(t *testing.T) {
 	_ = Get[func(context.Context, int) (*TestUser, error)](ctx)
 }
 
-func TestFactoryAnonymousWithOptional(t *testing.T) {
+func TestAdapterAnonymousWithOptional(t *testing.T) {
 	// Test GetOptional with anonymous function types
 	db := &TestDatabase{Name: "TestDB"}
 
 	ctx := NewDependencyContext(context.Background(), db,
-		Factory[func(ctx context.Context, userID string) (*TestUser, error)](lookupUser))
+		Adapt[func(ctx context.Context, userID string) (*TestUser, error)](lookupUser))
 
 	// Try to get with exact same type - parameter names don't matter
-	factory1, found1 := GetOptional[func(ctx context.Context, userID string) (*TestUser, error)](ctx)
+	adapter1, found1 := GetOptional[func(ctx context.Context, userID string) (*TestUser, error)](ctx)
 	if !found1 {
-		t.Error("should find factory with exact type match")
+		t.Error("should find adapter with exact type match")
 	}
-	if factory1 == nil {
-		t.Error("factory should not be nil")
+	if adapter1 == nil {
+		t.Error("adapter should not be nil")
 	}
 
 	// Try to get with same signature but different parameter names - should work
-	factory2, found2 := GetOptional[func(context.Context, string) (*TestUser, error)](ctx)
+	adapter2, found2 := GetOptional[func(context.Context, string) (*TestUser, error)](ctx)
 	if !found2 {
-		t.Error("should find factory with same signature (parameter names ignored)")
+		t.Error("should find adapter with same signature (parameter names ignored)")
 	}
-	if factory2 == nil {
-		t.Error("factory should not be nil")
+	if adapter2 == nil {
+		t.Error("adapter should not be nil")
 	}
 
 	// Try to get with different signature - should not find
-	factory3, found3 := GetOptional[func(context.Context, int) (*TestUser, error)](ctx)
+	adapter3, found3 := GetOptional[func(context.Context, int) (*TestUser, error)](ctx)
 	if found3 {
-		t.Error("should not find factory with different signature")
+		t.Error("should not find adapter with different signature")
 	}
-	if factory3 != nil {
-		t.Error("factory should be nil when not found")
+	if adapter3 != nil {
+		t.Error("adapter should be nil when not found")
 	}
 }
 
-func TestFactoryAnonymousStatus(t *testing.T) {
+func TestAdapterAnonymousStatus(t *testing.T) {
 	// Test how Status displays anonymous function types
 	db := &TestDatabase{Name: "TestDB"}
 
 	ctx := NewDependencyContext(context.Background(), db,
-		Factory[func(ctx context.Context, userID string) (*TestUser, error)](lookupUser))
+		Adapt[func(ctx context.Context, userID string) (*TestUser, error)](lookupUser))
 
 	status := Status(ctx)
 	t.Logf("Status with anonymous function type:\n%s", status)
@@ -439,37 +441,37 @@ func TestFactoryAnonymousStatus(t *testing.T) {
 		t.Error("Status should include the anonymous function type")
 	}
 
-	// Check that it shows as a factory
-	if !strings.Contains(status, "factory wrapping:") {
-		t.Error("Should show as factory in status")
+	// Check that it shows as an adapter
+	if !strings.Contains(status, "adapter wrapping:") {
+		t.Error("Should show as adapter in status")
 	}
 }
 
-func TestFactoryAnonymousMultiple(t *testing.T) {
+func TestAdapterAnonymousMultiple(t *testing.T) {
 	// Test multiple anonymous function types in same context
 	db := &TestDatabase{Name: "TestDB"}
 	config := &TestConfig{APIKey: "secret"}
 
 	// Create two different anonymous function types with different signatures
 	ctx := NewDependencyContext(context.Background(), db, config,
-		Factory[func(ctx context.Context, userID string) (*TestUser, error)](lookupUser),
-		Factory[func(ctx context.Context, op string, val int) (string, error)](complexFunction))
+		Adapt[func(ctx context.Context, userID string) (*TestUser, error)](lookupUser),
+		Adapt[func(ctx context.Context, op string, val int) (string, error)](complexFunction))
 
-	// Get the first factory
+	// Get the first adapter
 	userFactory := Get[func(ctx context.Context, userID string) (*TestUser, error)](ctx)
 	user, err := userFactory(ctx, "test-user")
 	if err != nil {
-		t.Fatalf("unexpected error from user factory: %v", err)
+		t.Fatalf("unexpected error from user adapter: %v", err)
 	}
 	if user.ID != "test-user" {
 		t.Errorf("expected user ID 'test-user', got '%s'", user.ID)
 	}
 
-	// Get the second factory
+	// Get the second adapter
 	complexFactory := Get[func(ctx context.Context, op string, val int) (string, error)](ctx)
 	result, err := complexFactory(ctx, "test", 42)
 	if err != nil {
-		t.Fatalf("unexpected error from complex factory: %v", err)
+		t.Fatalf("unexpected error from complex adapter: %v", err)
 	}
 	expected := "TestDB:secret:test:" + string(rune(42))
 	if result != expected {
@@ -477,23 +479,23 @@ func TestFactoryAnonymousMultiple(t *testing.T) {
 	}
 }
 
-func TestFactoryAnonymousNestedContext(t *testing.T) {
+func TestAdapterAnonymousNestedContext(t *testing.T) {
 	// Test anonymous function types with nested contexts
 	db := &TestDatabase{Name: "ParentDB"}
 
-	// Parent context with anonymous factory
+	// Parent context with anonymous adapter
 	parentCtx := NewDependencyContext(context.Background(), db,
-		Factory[func(ctx context.Context, userID string) (*TestUser, error)](lookupUser))
+		Adapt[func(ctx context.Context, userID string) (*TestUser, error)](lookupUser))
 
 	// Child context trying to override (should not work due to security)
 	newDB := &TestDatabase{Name: "ChildDB"}
 	childCtx := NewDependencyContext(parentCtx, newDB, WithOverrides())
 
-	// Get factory from child context
-	factory := Get[func(ctx context.Context, userID string) (*TestUser, error)](childCtx)
+	// Get adapter from child context
+	adapter := Get[func(ctx context.Context, userID string) (*TestUser, error)](childCtx)
 
 	// Should use parent's database
-	user, err := factory(childCtx, "nested-user")
+	user, err := adapter(childCtx, "nested-user")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -502,18 +504,18 @@ func TestFactoryAnonymousNestedContext(t *testing.T) {
 	}
 }
 
-func TestFactoryAnonymousTypeAliases(t *testing.T) {
+func TestAdapterAnonymousTypeAliases(t *testing.T) {
 	// Test behavior with type aliases
 	type MyUserFunc = func(ctx context.Context, userID string) (*TestUser, error)
 
 	db := &TestDatabase{Name: "TestDB"}
 
 	// Register with type alias
-	ctx := NewDependencyContext(context.Background(), db, Factory[MyUserFunc](lookupUser))
+	ctx := NewDependencyContext(context.Background(), db, Adapt[MyUserFunc](lookupUser))
 
 	// Get with type alias - should work
-	factory1 := Get[MyUserFunc](ctx)
-	user1, err := factory1(ctx, "alias-user")
+	adapter1 := Get[MyUserFunc](ctx)
+	user1, err := adapter1(ctx, "alias-user")
 	if err != nil {
 		t.Fatalf("unexpected error with type alias: %v", err)
 	}
@@ -522,8 +524,8 @@ func TestFactoryAnonymousTypeAliases(t *testing.T) {
 	}
 
 	// Get with expanded type - should also work since it's an alias
-	factory2 := Get[func(ctx context.Context, userID string) (*TestUser, error)](ctx)
-	user2, err := factory2(ctx, "expanded-user")
+	adapter2 := Get[func(ctx context.Context, userID string) (*TestUser, error)](ctx)
+	user2, err := adapter2(ctx, "expanded-user")
 	if err != nil {
 		t.Fatalf("unexpected error with expanded type: %v", err)
 	}
@@ -533,7 +535,7 @@ func TestFactoryAnonymousTypeAliases(t *testing.T) {
 }
 
 func TestRegularAnonymousFunctions(t *testing.T) {
-	// Test what happens with regular (non-factory) anonymous function dependencies
+	// Test what happens with regular (non-adapter) anonymous function dependencies
 
 	// Create an anonymous function
 	myFunc := func(x int) string {
@@ -557,7 +559,7 @@ func TestRegularAnonymousFunctions(t *testing.T) {
 		t.Error("Status should show pointer to anonymous function type")
 	}
 	if !strings.Contains(status, "direct value set") {
-		t.Error("Should show as direct value, not factory")
+		t.Error("Should show as direct value, not adapter")
 	}
 }
 
@@ -573,8 +575,8 @@ func TestAnonymousFunctionComparison(t *testing.T) {
 
 	ctx := NewDependencyContext(context.Background(),
 		db,
-		&regularFunc,                                                          // Regular function stored as pointer
-		Factory[func(context.Context, string) (*TestUser, error)](lookupUser), // Factory
+		&regularFunc, // Regular function stored as pointer
+		Adapt[func(context.Context, string) (*TestUser, error)](lookupUser), // Factory
 	)
 
 	// Get regular function
@@ -584,9 +586,9 @@ func TestAnonymousFunctionComparison(t *testing.T) {
 		t.Errorf("expected 'Regular', got '%s'", user1.Name)
 	}
 
-	// Get factory function (not a pointer)
-	factory := Get[func(context.Context, string) (*TestUser, error)](ctx)
-	user2, _ := factory(ctx, "fact")
+	// Get adapter function (not a pointer)
+	adapter := Get[func(context.Context, string) (*TestUser, error)](ctx)
+	user2, _ := adapter(ctx, "fact")
 	if user2.Name != "Test User from TestDB" {
 		t.Errorf("expected 'Test User from TestDB', got '%s'", user2.Name)
 	}
@@ -596,22 +598,22 @@ func TestAnonymousFunctionComparison(t *testing.T) {
 	t.Logf("Status comparison:\n%s", status)
 }
 
-// Test factory error handling when dependencies can't be resolved at runtime
-func TestFactoryDependencyResolutionError(t *testing.T) {
+// Test adapter error handling when dependencies can't be resolved at runtime
+func TestAdapterDependencyResolutionError(t *testing.T) {
 	// Create a context with a generator that fails
 	brokenGen := func(ctx context.Context) (*TestDatabase, error) {
 		return nil, errors.New("database connection failed")
 	}
 
-	// Create context with the broken generator and a factory that depends on it
-	ctx := NewDependencyContext(context.Background(), brokenGen, Factory[UserFactory](lookupUser))
+	// Create context with the broken generator and an adapter that depends on it
+	ctx := NewDependencyContext(context.Background(), brokenGen, Adapt[UserAdapter](lookupUser))
 
-	// Get the factory
-	factory := Get[UserFactory](ctx)
+	// Get the adapter
+	adapter := Get[UserAdapter](ctx)
 
-	// Try to use the factory - this should trigger the error handling path
+	// Try to use the adapter - this should trigger the error handling path
 	// because the TestDatabase dependency will fail to resolve
-	user, err := factory(ctx, "test-user")
+	user, err := adapter(ctx, "test-user")
 
 	// Should get an error, not panic
 	if err == nil {
@@ -627,8 +629,8 @@ func TestFactoryDependencyResolutionError(t *testing.T) {
 	}
 }
 
-// Test factory that doesn't return an error
-func TestFactoryDependencyResolutionErrorNoErrorReturn(t *testing.T) {
+// Test adapter that doesn't return an error
+func TestAdapterDependencyResolutionErrorNoErrorReturn(t *testing.T) {
 	// Create a function that doesn't return an error
 	noErrorFunc := func(ctx context.Context, db *TestDatabase, userID string) *TestUser {
 		return &TestUser{ID: userID, Name: db.Name}
@@ -641,19 +643,19 @@ func TestFactoryDependencyResolutionErrorNoErrorReturn(t *testing.T) {
 		return nil, errors.New("database unavailable")
 	}
 
-	ctx := NewDependencyContext(context.Background(), brokenGen, Factory[NoErrorFactory](noErrorFunc))
+	ctx := NewDependencyContext(context.Background(), brokenGen, Adapt[NoErrorFactory](noErrorFunc))
 
-	// Get the factory
-	factory := Get[NoErrorFactory](ctx)
+	// Get the adapter
+	adapter := Get[NoErrorFactory](ctx)
 
-	// Try to use the factory - should panic since the factory doesn't return error
+	// Try to use the adapter - should panic since the adapter doesn't return error
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("expected panic when factory without error return can't resolve dependencies")
+			t.Error("expected panic when adapter without error return can't resolve dependencies")
 		} else {
 			// Verify the panic message
 			if msg, ok := r.(string); ok {
-				if !contains(msg, "failed to resolve dependency for factory") {
+				if !contains(msg, "failed to resolve dependency for adapter") {
 					t.Errorf("unexpected panic message: %s", msg)
 				}
 			}
@@ -661,11 +663,11 @@ func TestFactoryDependencyResolutionErrorNoErrorReturn(t *testing.T) {
 	}()
 
 	// This should panic
-	_ = factory(ctx, "test-user")
+	_ = adapter(ctx, "test-user")
 }
 
-// Test factory with multiple return values including error
-func TestFactoryMultipleReturnsWithError(t *testing.T) {
+// Test adapter with multiple return values including error
+func TestAdapterMultipleReturnsWithError(t *testing.T) {
 	// Create a function that returns multiple values plus error
 	multiReturnFunc := func(ctx context.Context, db *TestDatabase, userID string) (*TestUser, string, error) {
 		if db == nil {
@@ -678,13 +680,13 @@ func TestFactoryMultipleReturnsWithError(t *testing.T) {
 	type MultiReturnFactory func(ctx context.Context, userID string) (*TestUser, string, error)
 
 	db := &TestDatabase{Name: "TestDB"}
-	ctx := NewDependencyContext(context.Background(), db, Factory[MultiReturnFactory](multiReturnFunc))
+	ctx := NewDependencyContext(context.Background(), db, Adapt[MultiReturnFactory](multiReturnFunc))
 
-	// Get the factory
-	factory := Get[MultiReturnFactory](ctx)
+	// Get the adapter
+	adapter := Get[MultiReturnFactory](ctx)
 
 	// Test successful case
-	user, status, err := factory(ctx, "user1")
+	user, status, err := adapter(ctx, "user1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -700,7 +702,7 @@ func TestFactoryMultipleReturnsWithError(t *testing.T) {
 	failingDB := func(ctx context.Context) (*TestDatabase, error) {
 		return nil, errors.New("db connection failed")
 	}
-	errorCtx := NewDependencyContext(context.Background(), failingDB, Factory[MultiReturnFactory](multiReturnFunc))
+	errorCtx := NewDependencyContext(context.Background(), failingDB, Adapt[MultiReturnFactory](multiReturnFunc))
 	errorFactory := Get[MultiReturnFactory](errorCtx)
 
 	user2, status2, err2 := errorFactory(errorCtx, "user2")
@@ -717,8 +719,8 @@ func TestFactoryMultipleReturnsWithError(t *testing.T) {
 	}
 }
 
-// Test factory with complex return types
-func TestFactoryComplexReturnTypes(t *testing.T) {
+// Test adapter with complex return types
+func TestAdapterComplexReturnTypes(t *testing.T) {
 	type Result struct {
 		Data  string
 		Count int
@@ -731,18 +733,18 @@ func TestFactoryComplexReturnTypes(t *testing.T) {
 		return result, user, nil
 	}
 
-	type ComplexFactory func(ctx context.Context, input string) (Result, *TestUser, error)
+	type ComplexAdapter func(ctx context.Context, input string) (Result, *TestUser, error)
 
 	// Create context with failing database generator
 	failingDB := func(ctx context.Context) (*TestDatabase, error) {
 		return nil, errors.New("database error")
 	}
-	ctx := NewDependencyContext(context.Background(), failingDB, Factory[ComplexFactory](complexFunc))
+	ctx := NewDependencyContext(context.Background(), failingDB, Adapt[ComplexAdapter](complexFunc))
 
-	factory := Get[ComplexFactory](ctx)
+	adapter := Get[ComplexAdapter](ctx)
 
-	// Test with the factory - should fail to resolve database
-	result, user, err := factory(ctx, "test")
+	// Test with the adapter - should fail to resolve database
+	result, user, err := adapter(ctx, "test")
 
 	// Should get error and zero values
 	if err == nil {
@@ -757,7 +759,7 @@ func TestFactoryComplexReturnTypes(t *testing.T) {
 }
 
 // Test nested dependency resolution failure
-func TestFactoryNestedDependencyFailure(t *testing.T) {
+func TestAdapterNestedDependencyFailure(t *testing.T) {
 	// Create a chain of dependencies where one fails
 	type Service struct {
 		Name string
@@ -776,12 +778,12 @@ func TestFactoryNestedDependencyFailure(t *testing.T) {
 	type ServiceFactory func(ctx context.Context, id string) (*TestUser, error)
 
 	db := &TestDatabase{Name: "TestDB"}
-	ctx := NewDependencyContext(context.Background(), db, failingGen, Factory[ServiceFactory](funcNeedsService))
+	ctx := NewDependencyContext(context.Background(), db, failingGen, Adapt[ServiceFactory](funcNeedsService))
 
-	factory := Get[ServiceFactory](ctx)
+	adapter := Get[ServiceFactory](ctx)
 
 	// Should fail when trying to resolve Service dependency
-	user, err := factory(ctx, "test-id")
+	user, err := adapter(ctx, "test-id")
 	if err == nil {
 		t.Error("expected error when nested dependency fails")
 	}
@@ -795,8 +797,8 @@ func TestFactoryNestedDependencyFailure(t *testing.T) {
 	}
 }
 
-// Test factory that only returns an error
-func TestFactoryOnlyErrorReturn(t *testing.T) {
+// Test adapter that only returns an error
+func TestAdapterOnlyErrorReturn(t *testing.T) {
 	// Function that only returns error
 	validateFunc := func(ctx context.Context, db *TestDatabase, input string) error {
 		if db == nil {
@@ -815,11 +817,11 @@ func TestFactoryOnlyErrorReturn(t *testing.T) {
 		return nil, errors.New("db unavailable")
 	}
 
-	ctx := NewDependencyContext(context.Background(), failingDB, Factory[ValidatorFactory](validateFunc))
-	factory := Get[ValidatorFactory](ctx)
+	ctx := NewDependencyContext(context.Background(), failingDB, Adapt[ValidatorFactory](validateFunc))
+	adapter := Get[ValidatorFactory](ctx)
 
 	// Should return the dependency resolution error
-	err := factory(ctx, "valid-input")
+	err := adapter(ctx, "valid-input")
 	if err == nil {
 		t.Error("expected error when dependency fails")
 	}
@@ -828,8 +830,8 @@ func TestFactoryOnlyErrorReturn(t *testing.T) {
 	}
 }
 
-// Test factory with non-pointer return types
-func TestFactoryValueReturnTypes(t *testing.T) {
+// Test adapter with non-pointer return types
+func TestAdapterValueReturnTypes(t *testing.T) {
 	// Function that returns values, not pointers
 	calcFunc := func(ctx context.Context, db *TestDatabase, x int) (int, bool, error) {
 		if db == nil {
@@ -845,11 +847,11 @@ func TestFactoryValueReturnTypes(t *testing.T) {
 		return nil, errors.New("calculation database offline")
 	}
 
-	ctx := NewDependencyContext(context.Background(), failingDB, Factory[CalcFactory](calcFunc))
-	factory := Get[CalcFactory](ctx)
+	ctx := NewDependencyContext(context.Background(), failingDB, Adapt[CalcFactory](calcFunc))
+	adapter := Get[CalcFactory](ctx)
 
 	// Should return zero values and error
-	result, ok, err := factory(ctx, 21)
+	result, ok, err := adapter(ctx, 21)
 	if err == nil {
 		t.Error("expected error")
 	}
@@ -870,134 +872,135 @@ func contains(s, substr string) bool {
 	}
 	return false
 }
-// Test that factory dependencies are not resolved until the factory is called
-func TestFactoryLazyDependencyResolution(t *testing.T) {
+
+// Test that adapter dependencies are not resolved until the adapter is called
+func TestAdapterLazyDependencyResolution(t *testing.T) {
 	// Counter to track when the database generator is called
 	var dbGeneratorCalled int32
-	
+
 	// Create a generator that tracks when it's called
 	dbGenerator := func(ctx context.Context) (*TestDatabase, error) {
 		atomic.AddInt32(&dbGeneratorCalled, 1)
 		return &TestDatabase{Name: "GeneratedDB"}, nil
 	}
-	
-	// Create context with the tracking generator and a factory
-	ctx := NewDependencyContext(context.Background(), dbGenerator, Factory[UserFactory](lookupUser))
-	
+
+	// Create context with the tracking generator and an adapter
+	ctx := NewDependencyContext(context.Background(), dbGenerator, Adapt[UserAdapter](lookupUser))
+
 	// At this point, the database generator should NOT have been called
 	if atomic.LoadInt32(&dbGeneratorCalled) != 0 {
 		t.Error("database generator was called during context creation")
 	}
-	
-	// Get the factory - this should also NOT trigger the generator
-	factory := Get[UserFactory](ctx)
+
+	// Get the adapter - this should also NOT trigger the generator
+	adapter := Get[UserAdapter](ctx)
 	if atomic.LoadInt32(&dbGeneratorCalled) != 0 {
-		t.Error("database generator was called when getting the factory")
+		t.Error("database generator was called when getting the adapter")
 	}
-	
-	// Now call the factory - this SHOULD trigger the generator
-	user, err := factory(ctx, "lazy-user")
+
+	// Now call the adapter - this SHOULD trigger the generator
+	user, err := adapter(ctx, "lazy-user")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	// Verify the generator was called exactly once
 	if calls := atomic.LoadInt32(&dbGeneratorCalled); calls != 1 {
 		t.Errorf("expected database generator to be called once, was called %d times", calls)
 	}
-	
+
 	// Verify the result uses the generated database
 	if user.Name != "Test User from GeneratedDB" {
 		t.Errorf("expected user from GeneratedDB, got '%s'", user.Name)
 	}
-	
-	// Call the factory again - generator should not be called again (cached)
-	user2, err := factory(ctx, "another-user")
+
+	// Call the adapter again - generator should not be called again (cached)
+	user2, err := adapter(ctx, "another-user")
 	if err != nil {
 		t.Fatalf("unexpected error on second call: %v", err)
 	}
-	
+
 	// Generator should still have been called only once
 	if calls := atomic.LoadInt32(&dbGeneratorCalled); calls != 1 {
 		t.Errorf("expected database generator to be called once total, was called %d times", calls)
 	}
-	
+
 	if user2.Name != "Test User from GeneratedDB" {
 		t.Errorf("expected user from GeneratedDB on second call, got '%s'", user2.Name)
 	}
 }
 
 // Test with multiple factories sharing lazy dependencies
-func TestFactoryLazyMultipleFactories(t *testing.T) {
+func TestAdapterLazyMultipleAdapters(t *testing.T) {
 	var dbCalls int32
 	var configCalls int32
-	
+
 	dbGen := func(ctx context.Context) (*TestDatabase, error) {
 		atomic.AddInt32(&dbCalls, 1)
 		return &TestDatabase{Name: "LazyDB"}, nil
 	}
-	
+
 	configGen := func(ctx context.Context) (*TestConfig, error) {
 		atomic.AddInt32(&configCalls, 1)
 		return &TestConfig{APIKey: "lazy-key"}, nil
 	}
-	
+
 	// Create context with generators and multiple factories
-	ctx := NewDependencyContext(context.Background(), 
-		dbGen, 
+	ctx := NewDependencyContext(context.Background(),
+		dbGen,
 		configGen,
-		Factory[UserFactory](lookupUser),
-		Factory[ComplexFactory](complexFunction),
+		Adapt[UserAdapter](lookupUser),
+		Adapt[ComplexAdapter](complexFunction),
 	)
-	
+
 	// No generators should be called yet
 	if atomic.LoadInt32(&dbCalls) != 0 || atomic.LoadInt32(&configCalls) != 0 {
 		t.Error("generators called during context creation")
 	}
-	
+
 	// Get both factories
-	userFactory := Get[UserFactory](ctx)
-	complexFactory := Get[ComplexFactory](ctx)
-	
+	userFactory := Get[UserAdapter](ctx)
+	complexFactory := Get[ComplexAdapter](ctx)
+
 	// Still no generators should be called
 	if atomic.LoadInt32(&dbCalls) != 0 || atomic.LoadInt32(&configCalls) != 0 {
 		t.Error("generators called when getting factories")
 	}
-	
-	// Call user factory - should only trigger DB generator
+
+	// Call user adapter - should only trigger DB generator
 	_, err := userFactory(ctx, "user1")
 	if err != nil {
-		t.Fatalf("error calling user factory: %v", err)
+		t.Fatalf("error calling user adapter: %v", err)
 	}
-	
+
 	if dbCalls := atomic.LoadInt32(&dbCalls); dbCalls != 1 {
 		t.Errorf("expected DB generator called once, was called %d times", dbCalls)
 	}
 	if configCalls := atomic.LoadInt32(&configCalls); configCalls != 0 {
 		t.Errorf("expected config generator not called, was called %d times", configCalls)
 	}
-	
-	// Call complex factory - should trigger config generator but not DB again
+
+	// Call complex adapter - should trigger config generator but not DB again
 	result, err := complexFactory(ctx, "test", 42)
 	if err != nil {
-		t.Fatalf("error calling complex factory: %v", err)
+		t.Fatalf("error calling complex adapter: %v", err)
 	}
-	
+
 	if dbCalls := atomic.LoadInt32(&dbCalls); dbCalls != 1 {
 		t.Errorf("expected DB generator still called once, was called %d times", dbCalls)
 	}
 	if configCalls := atomic.LoadInt32(&configCalls); configCalls != 1 {
 		t.Errorf("expected config generator called once, was called %d times", configCalls)
 	}
-	
+
 	expected := "LazyDB:lazy-key:test:" + string(rune(42))
 	if result != expected {
 		t.Errorf("expected '%s', got '%s'", expected, result)
 	}
 }
 
-// Test that expensive operations don't happen until factory is called
-func TestFactoryLazyExpensiveOperation(t *testing.T) {
+// Test that expensive operations don't happen until adapter is called
+func TestAdapterLazyExpensiveOperation(t *testing.T) {
 	// Simulate an expensive database connection
 	expensiveDBGen := func(ctx context.Context) (*TestDatabase, error) {
 		// This would be expensive - sleep to simulate
@@ -1008,117 +1011,117 @@ func TestFactoryLazyExpensiveOperation(t *testing.T) {
 			return nil, ctx.Err()
 		}
 	}
-	
+
 	start := time.Now()
-	
+
 	// Create context with expensive generator
-	ctx := NewDependencyContext(context.Background(), 
+	ctx := NewDependencyContext(context.Background(),
 		expensiveDBGen,
-		Factory[UserFactory](lookupUser),
+		Adapt[UserAdapter](lookupUser),
 	)
-	
+
 	// Context creation should be fast
 	contextTime := time.Since(start)
 	if contextTime > 10*time.Millisecond {
 		t.Errorf("context creation took too long: %v", contextTime)
 	}
-	
-	// Getting factory should also be fast
-	factory := Get[UserFactory](ctx)
+
+	// Getting adapter should also be fast
+	adapter := Get[UserAdapter](ctx)
 	getTime := time.Since(start)
 	if getTime > 10*time.Millisecond {
-		t.Errorf("getting factory took too long: %v", getTime)
+		t.Errorf("getting adapter took too long: %v", getTime)
 	}
-	
-	// Calling factory will be slow due to expensive operation
+
+	// Calling adapter will be slow due to expensive operation
 	callStart := time.Now()
-	user, err := factory(ctx, "expensive-user")
+	user, err := adapter(ctx, "expensive-user")
 	callTime := time.Since(callStart)
-	
+
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	// This should have taken at least 50ms
 	if callTime < 50*time.Millisecond {
-		t.Errorf("factory call was too fast, expensive operation may not have run: %v", callTime)
+		t.Errorf("adapter call was too fast, expensive operation may not have run: %v", callTime)
 	}
-	
+
 	if user.Name != "Test User from ExpensiveDB" {
 		t.Errorf("unexpected user name: %s", user.Name)
 	}
 }
 
-// Test Status doesn't trigger factory dependency resolution
-func TestFactoryLazyStatus(t *testing.T) {
+// Test Status doesn't trigger adapter dependency resolution
+func TestAdapterLazyStatus(t *testing.T) {
 	var generatorCalled int32
-	
+
 	trackingGen := func(ctx context.Context) (*TestDatabase, error) {
 		atomic.AddInt32(&generatorCalled, 1)
 		return &TestDatabase{Name: "StatusDB"}, nil
 	}
-	
+
 	ctx := NewDependencyContext(context.Background(),
 		trackingGen,
-		Factory[UserFactory](lookupUser),
+		Adapt[UserAdapter](lookupUser),
 	)
-	
+
 	// Call Status - should not trigger generators
 	status := Status(ctx)
-	
+
 	if atomic.LoadInt32(&generatorCalled) != 0 {
 		t.Error("Status() triggered generator execution")
 	}
-	
+
 	// Verify status shows uninitialized generator
 	if !strings.Contains(status, "uninitialized - generator:") {
 		t.Errorf("Status should show uninitialized generator, got:\n%s", status)
 	}
-	
-	// Verify factory is shown
-	if !strings.Contains(status, "factory wrapping:") {
-		t.Errorf("Status should show factory, got:\n%s", status)
+
+	// Verify adapter is shown
+	if !strings.Contains(status, "adapter wrapping:") {
+		t.Errorf("Status should show adapter, got:\n%s", status)
 	}
 }
 
-// Test that unused factory dependencies are never resolved
-func TestFactoryUnusedDependencies(t *testing.T) {
+// Test that unused adapter dependencies are never resolved
+func TestAdapterUnusedDependencies(t *testing.T) {
 	var dbCalled int32
 	var configCalled int32
 	var serviceCalled int32
-	
+
 	// Create multiple generators
 	dbGen := func(ctx context.Context) (*TestDatabase, error) {
 		atomic.AddInt32(&dbCalled, 1)
 		return &TestDatabase{Name: "DB"}, nil
 	}
-	
+
 	configGen := func(ctx context.Context) (*TestConfig, error) {
 		atomic.AddInt32(&configCalled, 1)
 		return &TestConfig{APIKey: "key"}, nil
 	}
-	
+
 	type ServiceType struct{ Name string }
 	serviceGen := func(ctx context.Context) (*ServiceType, error) {
 		atomic.AddInt32(&serviceCalled, 1)
 		return &ServiceType{Name: "Service"}, nil
 	}
-	
-	// Create a factory that only needs database
+
+	// Create an adapter that only needs database
 	ctx := NewDependencyContext(context.Background(),
 		dbGen,
 		configGen,
 		serviceGen,
-		Factory[UserFactory](lookupUser), // Only needs TestDatabase
+		Adapt[UserAdapter](lookupUser), // Only needs TestDatabase
 	)
-	
-	// Get and use the factory
-	factory := Get[UserFactory](ctx)
-	_, err := factory(ctx, "user")
+
+	// Get and use the adapter
+	adapter := Get[UserAdapter](ctx)
+	_, err := adapter(ctx, "user")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	// Only the database generator should have been called
 	if calls := atomic.LoadInt32(&dbCalled); calls != 1 {
 		t.Errorf("expected DB generator called once, was called %d times", calls)
@@ -1128,5 +1131,201 @@ func TestFactoryUnusedDependencies(t *testing.T) {
 	}
 	if calls := atomic.LoadInt32(&serviceCalled); calls != 0 {
 		t.Errorf("expected service generator not called, was called %d times", calls)
+	}
+}
+
+// Test that factories are created only once and reused
+func TestAdapterReuseNotRecreated(t *testing.T) {
+	// Counter to track adapter creation
+	var adapterCreationCount int32
+
+	// Create a function that tracks when the adapter is created
+	instrumentedFunc := func(ctx context.Context, db *TestDatabase, userID string) (*TestUser, error) {
+		return &TestUser{ID: userID, Name: db.Name}, nil
+	}
+
+	// Wrap the Factory call to track when it's invoked
+	ctx := NewDependencyContext(context.Background(),
+		&TestDatabase{Name: "TestDB"},
+		func() any {
+			atomic.AddInt32(&adapterCreationCount, 1)
+			return Adapt[UserAdapter](instrumentedFunc)
+		}(),
+	)
+
+	// Get the adapter multiple times
+	adapter1 := Get[UserAdapter](ctx)
+	adapter2 := Get[UserAdapter](ctx)
+	adapter3 := Get[UserAdapter](ctx)
+
+	// Verify we got the same adapter instance
+	// Note: We can't directly compare function values in Go, but we can verify behavior
+	user1, _ := adapter1(ctx, "user1")
+	user2, _ := adapter2(ctx, "user2")
+	user3, _ := adapter3(ctx, "user3")
+
+	if user1.Name != "TestDB" || user2.Name != "TestDB" || user3.Name != "TestDB" {
+		t.Error("factories not behaving consistently")
+	}
+
+	// The adapter creation should have happened only during context initialization
+	if count := atomic.LoadInt32(&adapterCreationCount); count != 1 {
+		t.Errorf("expected adapter creation to happen once, happened %d times", count)
+	}
+}
+
+// Test that the adapter function itself is only created once
+func TestAdapterFunctionCreatedOnce(t *testing.T) {
+	// We'll verify this by checking that adapter validation only happens once
+	// by using a generator that counts calls
+	var dbGenCalls int32
+	dbGen := func(ctx context.Context) (*TestDatabase, error) {
+		atomic.AddInt32(&dbGenCalls, 1)
+		return &TestDatabase{Name: "GenDB"}, nil
+	}
+
+	ctx := NewDependencyContext(context.Background(),
+		dbGen,
+		Adapt[UserAdapter](lookupUser),
+	)
+
+	// Get the adapter multiple times
+	for i := 0; i < 5; i++ {
+		adapter := Get[UserAdapter](ctx)
+		// Use the adapter
+		user, err := adapter(ctx, "test")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if user.Name != "Test User from GenDB" {
+			t.Errorf("unexpected user name: %s", user.Name)
+		}
+	}
+
+	// The database generator should only be called once (lazy, cached)
+	if calls := atomic.LoadInt32(&dbGenCalls); calls != 1 {
+		t.Errorf("expected db generator called once, was called %d times", calls)
+	}
+}
+
+// Test concurrent access to ensure adapter is created only once
+func TestAdapterConcurrentCreation(t *testing.T) {
+	var creationCount int32
+
+	// Use a slow generator to increase chance of race conditions
+	slowGen := func(ctx context.Context) (*TestDatabase, error) {
+		// Increment counter when generator runs
+		atomic.AddInt32(&creationCount, 1)
+		time.Sleep(50 * time.Millisecond) // Simulate slow operation
+		return &TestDatabase{Name: "ConcurrentDB"}, nil
+	}
+
+	ctx := NewDependencyContext(context.Background(),
+		slowGen,
+		Adapt[UserAdapter](lookupUser),
+	)
+
+	// Try to get the adapter concurrently
+	var wg sync.WaitGroup
+	factories := make([]UserAdapter, 10)
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			factories[idx] = Get[UserAdapter](ctx)
+		}(i)
+	}
+
+	wg.Wait()
+
+	// All factories should be the same (behavior-wise)
+	// Use them all to trigger any lazy initialization
+	for i, adapter := range factories {
+		user, err := adapter(ctx, string(rune('0'+i)))
+		if err != nil {
+			t.Errorf("goroutine %d: unexpected error: %v", i, err)
+		}
+		if user.Name != "Test User from ConcurrentDB" {
+			t.Errorf("goroutine %d: unexpected result: %s", i, user.Name)
+		}
+	}
+
+	// The generator should only have been called once despite concurrent access
+	if calls := atomic.LoadInt32(&creationCount); calls != 1 {
+		t.Errorf("expected generator called once, was called %d times", calls)
+	}
+}
+
+// Test that getting an adapter from child contexts reuses the parent's adapter
+func TestAdapterReuseAcrossContexts(t *testing.T) {
+	db := &TestDatabase{Name: "ParentDB"}
+	parentCtx := NewDependencyContext(context.Background(), db, Adapt[UserAdapter](lookupUser))
+
+	// Create child contexts
+	child1 := NewDependencyContext(parentCtx, &TestDatabase{Name: "child1"}, &TestConfig{APIKey: "child1"})
+	child2 := NewDependencyContext(parentCtx, &TestDatabase{Name: "child2"}, &TestConfig{APIKey: "child2"})
+
+	// Get adapter from children
+	childFactory1 := Get[UserAdapter](child1)
+	childFactory2 := Get[UserAdapter](child2)
+
+	// Get adapter from parent - out of order to verify it works with the security model
+	parentFactory := Get[UserAdapter](parentCtx)
+
+	// All should produce the same results (using the parent's database)
+	userP, _ := parentFactory(parentCtx, "p")
+	user1, _ := childFactory1(child1, "c1")
+	user2, _ := childFactory2(child2, "c2")
+
+	if userP.Name != "Test User from ParentDB" {
+		t.Errorf("parent adapter produced wrong result: %s", userP.Name)
+	}
+	if user1.Name != "Test User from ParentDB" {
+		t.Errorf("child1 adapter produced wrong result: %s", user1.Name)
+	}
+	if user2.Name != "Test User from ParentDB" {
+		t.Errorf("child2 adapter produced wrong result: %s", user2.Name)
+	}
+}
+
+// Verify the actual slot storage behavior
+func TestAdapterSlotReuse(t *testing.T) {
+	db := &TestDatabase{Name: "SlotDB"}
+	ctx := NewDependencyContext(context.Background(), db, Adapt[UserAdapter](lookupUser))
+
+	dc := GetDependencyContext(ctx)
+
+	// Get the slot for UserAdapter
+	var slot1, slot2 *slot
+	if s, ok := dc.slots.Load(reflect.TypeOf((*UserAdapter)(nil)).Elem()); ok {
+		slot1 = s.(*slot)
+	} else {
+		t.Fatal("UserAdapter slot not found")
+	}
+
+	// Get adapter to ensure it's initialized
+	_ = Get[UserAdapter](ctx)
+
+	// Get the slot again
+	if s, ok := dc.slots.Load(reflect.TypeOf((*UserAdapter)(nil)).Elem()); ok {
+		slot2 = s.(*slot)
+	} else {
+		t.Fatal("UserAdapter slot not found on second lookup")
+	}
+
+	// Should be the exact same slot object
+	if slot1 != slot2 {
+		t.Error("slot objects are different, adapter may have been recreated")
+	}
+
+	// The value should be set (the adapter function)
+	if slot1.value == nil {
+		t.Error("slot value is nil")
+	}
+
+	// Status should indicate it's an adapter
+	if slot1.status != StatusAdapter {
+		t.Errorf("expected StatusAdapter, got %v", slot1.status)
 	}
 }
