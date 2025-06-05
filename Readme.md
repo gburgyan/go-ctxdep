@@ -347,6 +347,152 @@ func main() {
 }
 ```
 
+## Factory Functions
+
+The library supports factory functions that allow you to create partially applied functions where some parameters are filled from the dependency context while others are provided at call time.
+
+### Basic factory usage
+
+```Go
+type Database interface {
+    GetUser(ctx context.Context, id string) (*User, error)
+}
+
+type User struct {
+    ID    string
+    Name  string
+    Email string
+}
+
+// Define a factory type
+type UserFactory func(ctx context.Context, userID string) (*User, error)
+
+// Create a function that needs dependencies
+func lookupUser(ctx context.Context, db Database, userID string) (*User, error) {
+    return db.GetUser(ctx, userID)
+}
+
+func main() {
+    ctx := context.Background()
+    db := connectToDatabase() // Returns Database implementation
+    
+    // Register the factory
+    ctx = ctxdep.NewDependencyContext(ctx,
+        db,
+        ctxdep.Factory[UserFactory](lookupUser),
+    )
+    
+    // Get and use the factory
+    factory := ctxdep.Get[UserFactory](ctx)
+    user, err := factory(ctx, "user123")
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Found user: %+v\n", user)
+}
+```
+
+### Factories with multiple dependencies
+
+Factories can use multiple dependencies from the context:
+
+```Go
+type Config struct {
+    APIKey string
+}
+
+type ComplexFactory func(ctx context.Context, operation string, value int) (string, error)
+
+func complexOperation(ctx context.Context, db Database, cfg *Config, operation string, value int) (string, error) {
+    // Use both db and cfg along with the provided parameters
+    user, _ := db.GetUser(ctx, cfg.APIKey)
+    return fmt.Sprintf("%s: %s processed %d", operation, user.Name, value), nil
+}
+
+func main() {
+    ctx := context.Background()
+    db := connectToDatabase()
+    cfg := &Config{APIKey: "admin"}
+    
+    ctx = ctxdep.NewDependencyContext(ctx,
+        db,
+        cfg,
+        ctxdep.Factory[ComplexFactory](complexOperation),
+    )
+    
+    factory := ctxdep.Get[ComplexFactory](ctx)
+    result, _ := factory(ctx, "process", 42)
+    fmt.Println(result) // "process: Admin processed 42"
+}
+```
+
+### Factory validation
+
+Factories are validated during context initialization to ensure:
+- All dependencies required by the original function can be resolved from the context
+- The parameter and return types match between the factory type and the original function
+- The factory type includes a `context.Context` parameter if the original function has one
+
+```Go
+// This will panic during context creation because Config is not available
+ctx = ctxdep.NewDependencyContext(ctx,
+    db, // Missing cfg!
+    ctxdep.Factory[ComplexFactory](complexOperation),
+)
+```
+
+### Important notes about factories
+
+1. Factories cannot be used as generators for other dependencies - they are specifically for creating partially applied functions
+2. For security reasons, factories capture dependencies from the context where they were created, not from the context passed when calling the factory. This prevents child contexts from overriding dependencies that the factory depends on
+3. All validation happens during `NewDependencyContext`, ensuring runtime safety
+
+### Using anonymous function types
+
+While named function types (like `UserFactory`) are recommended for clarity and maintainability, you can also use anonymous function types with factories:
+
+```Go
+// Using anonymous function type
+ctx = ctxdep.NewDependencyContext(ctx,
+    db,
+    ctxdep.Factory[func(context.Context, string) (*User, error)](lookupUser),
+)
+
+// Retrieve with the same anonymous type
+factory := ctxdep.Get[func(context.Context, string) (*User, error)](ctx)
+```
+
+**Important notes about anonymous function types:**
+
+- Go considers anonymous function types identical based on their signature, not parameter names
+- `func(ctx context.Context, id string) (*User, error)` and `func(context.Context, string) (*User, error)` are the same type
+- Type aliases work as expected: `type MyFunc = func(context.Context, string) (*User, error)` can be used interchangeably with the expanded form
+- The `Status()` output shows anonymous function types as their full signature
+
+### Difference from regular function dependencies
+
+Regular functions can be stored as dependencies (as pointers), but they don't provide partial application:
+
+```Go
+// Regular function stored as dependency
+regularFunc := func(id string) *User { 
+    return &User{ID: id} 
+}
+ctx = ctxdep.NewDependencyContext(ctx, &regularFunc)
+
+// Retrieved as pointer
+fn := ctxdep.Get[*func(string) *User](ctx)
+user := (*fn)("123")  // Note: no dependency injection happens
+
+// Factory function - provides partial application
+ctx = ctxdep.NewDependencyContext(ctx,
+    db,
+    ctxdep.Factory[func(context.Context, string) (*User, error)](lookupUser),
+)
+factory := ctxdep.Get[func(context.Context, string) (*User, error)](ctx)
+user, err := factory(ctx, "123")  // db is injected from context
+```
+
 ### Cleanup behavior
 
 - Cleanup must be explicitly enabled with `WithCleanup()` or `WithCleanupFunc()`

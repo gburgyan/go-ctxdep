@@ -89,6 +89,8 @@ type slot struct {
 	lock      sync.Mutex
 	immediate *immediateDependencies
 	status    SlotStatus
+	// For factories, store the original function for diagnostics
+	factoryOriginal any
 }
 
 type SlotStatus int
@@ -97,6 +99,7 @@ const (
 	StatusDirect     SlotStatus = iota // directly set dependency
 	StatusGenerator                    // a generator ran to create this dependency
 	StatusFromParent                   // imported from a parent dependency context (optimization)
+	StatusFactory                      // a factory function that was processed
 )
 
 var errorType = reflect.TypeOf((*error)(nil)).Elem()
@@ -112,6 +115,7 @@ var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 func (d *DependencyContext) addDependenciesAndInitialize(ctx context.Context, deps ...any) {
 	d.addDependencies(deps, nil)
 	d.validateDependencies()
+	d.processFactories()
 	d.resolveImmediateDependencies(ctx)
 }
 
@@ -147,6 +151,10 @@ func (d *DependencyContext) addDependencies(deps []any, immediate *immediateDepe
 		if immediateWrapper, ok := dep.(*immediateDependencies); ok {
 			d.parentFixed = true
 			d.addDependencies(immediateWrapper.dependencies, immediateWrapper)
+		} else if fw, ok := dep.(*factoryWrapper); ok {
+			d.parentFixed = true
+			// Store the factory wrapper temporarily, will be processed later
+			d.addValue(fw.targetType, fw)
 		} else if subSlice, ok := dep.([]any); ok {
 			d.addDependencies(subSlice, immediate)
 			d.parentFixed = true
