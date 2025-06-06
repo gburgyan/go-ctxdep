@@ -35,6 +35,8 @@ func (d *DependencyContext) Status() string {
 				}
 			case StatusFromParent:
 				slotLine = fmt.Sprintf("%v - imported from parent context", t)
+			case StatusAdapter:
+				slotLine = fmt.Sprintf("%v - adapter wrapping: %s", t, formatGeneratorDebug(s.adapterOriginal))
 			}
 			// original slots have matching keys and slot types
 			slotVals[keyString] = slotLine
