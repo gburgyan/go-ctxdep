@@ -79,12 +79,12 @@ func (aw *adaptWrapper) analyzeFunction() {
 
 	// Verify return types match
 	if fnType.NumOut() != targetType.NumOut() {
-		panic(fmt.Sprintf("Factory function return count mismatch: original has %d, target has %d",
+		panic(fmt.Sprintf("Adapted function return count mismatch: original has %d, target has %d",
 			fnType.NumOut(), targetType.NumOut()))
 	}
 	for i := 0; i < fnType.NumOut(); i++ {
 		if fnType.Out(i) != targetType.Out(i) {
-			panic(fmt.Sprintf("Factory function return type mismatch at position %d: original has %v, target has %v",
+			panic(fmt.Sprintf("Adapted function return type mismatch at position %d: original has %v, target has %v",
 				i, fnType.Out(i), targetType.Out(i)))
 		}
 	}
@@ -101,11 +101,11 @@ func (aw *adaptWrapper) analyzeFunction() {
 	}
 
 	if !hasTargetContext {
-		panic("Factory target type must have context.Context parameter")
+		panic("Adapter target type must have context.Context parameter")
 	}
 
-	// Count how many parameters we can't fill from context (these become factory params)
-	// This is just a rough check - full validation happens during processFactories
+	// Count how many parameters we can't fill from context (these become adapter params)
+	// This is just a rough check - full validation happens during processAdapters
 	nonContextParams := 0
 	for i := 0; i < fnType.NumIn(); i++ {
 		if fnType.In(i) != contextType {
@@ -126,7 +126,7 @@ func (aw *adaptWrapper) analyzeFunction() {
 
 	// If we have negative dependency params, that's impossible
 	if maxDependencyParams < 0 {
-		panic(fmt.Sprintf("Factory parameter mismatch: target expects %d non-context parameters but original function can only provide %d at most",
+		panic(fmt.Sprintf("Adapter parameter mismatch: target expects %d non-context parameters but original function can only provide %d at most",
 			targetNonContextParams, nonContextParams))
 	}
 }
@@ -189,7 +189,7 @@ func (d *DependencyContext) validateAndCreateAdapter(aw *adaptWrapper) (any, err
 
 	// Verify that we have at least one context parameter
 	if len(contextParams) == 0 {
-		return nil, fmt.Errorf("factory function must have at least one parameter that can be filled from context")
+		return nil, fmt.Errorf("adapted function must have at least one parameter that can be filled from context")
 	}
 
 	// Check if target requires context.Context parameter
@@ -211,7 +211,7 @@ func (d *DependencyContext) validateAndCreateAdapter(aw *adaptWrapper) (any, err
 			}
 		}
 		if !hasOriginalContext {
-			return nil, fmt.Errorf("factory target type requires context.Context parameter but original function doesn't have one")
+			return nil, fmt.Errorf("adapter target type requires context.Context parameter but original function doesn't have one")
 		}
 	}
 
@@ -231,20 +231,20 @@ func (d *DependencyContext) validateAndCreateAdapter(aw *adaptWrapper) (any, err
 	if targetNonContextParams == 0 && !hasTargetContext {
 		// This is OK - it's a no-parameter adapter function
 	} else if targetNonContextParams > 0 && !hasTargetContext {
-		return nil, fmt.Errorf("factory target type must have context.Context parameter when it has other parameters")
+		return nil, fmt.Errorf("adapter target type must have context.Context parameter when it has other parameters")
 	}
 
 	// Special case: if all parameters can be filled from context but target expects parameters,
 	// we need to check if some of those context parameters should actually be runtime parameters
 	if len(adaptParamTypes) == 0 && targetNonContextParams > 0 {
 		// This could be valid if we're intentionally exposing some context parameters as runtime parameters
-		// We'll allow this and handle it in the factory function
+		// We'll allow this and handle it in the adapted function
 	} else if len(adaptParamTypes) != targetNonContextParams {
-		return nil, fmt.Errorf("factory parameter count mismatch: original has %d non-dependency parameters, target expects %d",
+		return nil, fmt.Errorf("adapter parameter count mismatch: original has %d non-dependency parameters, target expects %d",
 			len(adaptParamTypes), targetNonContextParams)
 	}
 
-	// Verify factory parameter types match target function
+	// Verify adapter parameter types match target function
 	targetParamIndex := 0
 	for i := 0; i < targetType.NumIn(); i++ {
 		targetParamType := targetType.In(i)
@@ -253,17 +253,17 @@ func (d *DependencyContext) validateAndCreateAdapter(aw *adaptWrapper) (any, err
 			continue
 		}
 		if targetParamIndex >= len(adaptParamTypes) {
-			return nil, fmt.Errorf("factory function parameter count mismatch")
+			return nil, fmt.Errorf("adapted function parameter count mismatch")
 		}
 		if targetParamType != adaptParamTypes[targetParamIndex] {
-			return nil, fmt.Errorf("factory function parameter type mismatch at position %d: expected %v, got %v",
+			return nil, fmt.Errorf("adapted function parameter type mismatch at position %d: expected %v, got %v",
 				i, targetParamType, adaptParamTypes[targetParamIndex])
 		}
 		targetParamIndex++
 	}
 
-	// Create the factory function
-	factoryFunc := reflect.MakeFunc(targetType, func(args []reflect.Value) []reflect.Value {
+	// Create the adapted function
+	adaptedFunc := reflect.MakeFunc(targetType, func(args []reflect.Value) []reflect.Value {
 		// Build the full parameter list for the original function
 		fullParams := make([]reflect.Value, fnType.NumIn())
 
@@ -271,7 +271,7 @@ func (d *DependencyContext) validateAndCreateAdapter(aw *adaptWrapper) (any, err
 		var ctx context.Context
 		adaptArgIndex := 0
 
-		// Extract context from factory args if present
+		// Extract context from adapter args if present
 		for i := 0; i < len(args); i++ {
 			if args[i].Type() == contextType {
 				ctx = args[i].Interface().(context.Context)
@@ -280,7 +280,7 @@ func (d *DependencyContext) validateAndCreateAdapter(aw *adaptWrapper) (any, err
 		}
 
 		if ctx == nil {
-			panic("factory function requires context.Context parameter")
+			panic("adapted function requires context.Context parameter")
 		}
 
 		// Fill parameters from context using the dependency context from creation time
@@ -317,7 +317,7 @@ func (d *DependencyContext) validateAndCreateAdapter(aw *adaptWrapper) (any, err
 				adaptArgIndex++
 			}
 			if adaptArgIndex >= len(args) {
-				panic("not enough arguments provided to factory function")
+				panic("not enough arguments provided to adapted function")
 			}
 			fullParams[idx] = args[adaptArgIndex]
 			adaptArgIndex++
@@ -328,7 +328,7 @@ func (d *DependencyContext) validateAndCreateAdapter(aw *adaptWrapper) (any, err
 		return fnValue.Call(fullParams)
 	})
 
-	return factoryFunc.Interface(), nil
+	return adaptedFunc.Interface(), nil
 }
 
 // processAdapters validates and creates adapted functions after regular dependencies are initialized

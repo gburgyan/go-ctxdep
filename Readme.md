@@ -781,8 +781,8 @@ func TestCanUserEditDocument(t *testing.T) {
                 }
                 
                 return ctxdep.NewDependencyContext(context.Background(),
-                    ctxdep.Factory[DocumentGetter](getDoc),
-                    ctxdep.Factory[PermissionChecker](checkPerm),
+                    ctxdep.Adapt[DocumentGetter](getDoc),
+                    ctxdep.Adapt[PermissionChecker](checkPerm),
                 )
             },
             expectedAllow: true,
@@ -803,8 +803,8 @@ func TestCanUserEditDocument(t *testing.T) {
                 }
                 
                 return ctxdep.NewDependencyContext(context.Background(),
-                    ctxdep.Factory[DocumentGetter](getDoc),
-                    ctxdep.Factory[PermissionChecker](checkPerm),
+                    ctxdep.Adapt[DocumentGetter](getDoc),
+                    ctxdep.Adapt[PermissionChecker](checkPerm),
                 )
             },
             expectedAllow: true,
@@ -822,8 +822,8 @@ func TestCanUserEditDocument(t *testing.T) {
                 }
                 
                 return ctxdep.NewDependencyContext(context.Background(),
-                    ctxdep.Factory[DocumentGetter](getDoc),
-                    ctxdep.Factory[PermissionChecker](checkPerm),
+                    ctxdep.Adapt[DocumentGetter](getDoc),
+                    ctxdep.Adapt[PermissionChecker](checkPerm),
                 )
             },
             expectedAllow: false,
@@ -856,7 +856,7 @@ func TestCanUserEditDocument(t *testing.T) {
 1. **No Mocking Frameworks** - Just simple functions that return what you need
 2. **Parallel Testing** - Each test has its own context, no shared state
 3. **Clear Test Intent** - The test setup clearly shows what each dependency will do
-4. **Type Safety** - The compiler ensures your test factories match the expected signatures
+4. **Type Safety** - The compiler ensures your test adapters match the expected signatures
 5. **No Abstraction Breaking** - The business logic doesn't know it's being tested
 6. **Lazy Evaluation** - Database connections are only made if actually needed
 
@@ -865,7 +865,7 @@ Compare this to traditional approaches:
 - **With mocking frameworks**: Verbose setup, runtime reflection, less clear intent
 - **With global variables**: Can't run tests in parallel, hidden dependencies
 
-The factory pattern preserves the natural structure of your code while making it completely testable.
+The adapter pattern preserves the natural structure of your code while making it completely testable.
 
 ### Cleanup behavior
 
