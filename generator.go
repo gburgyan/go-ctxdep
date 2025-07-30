@@ -27,12 +27,27 @@ func (d *DependencyContext) addGenerator(generatorFunction any, immediate *immed
 	for _, resultType := range typeInfo.funcReturns {
 		if existingSlotA, existing := d.slots.Load(resultType); existing {
 			existingSlot := existingSlotA.(*slot)
-			if !d.loose {
+			if !d.loose && !d.isOverrideable(resultType) {
 				panic(fmt.Sprintf("generator result type %v already exists--a generator may not override an existing slot", resultType))
 			}
 			if existingSlot.value != nil {
 				// Never override a concrete value
 				return
+			}
+		}
+
+		// Check if parent has this slot
+		if !d.loose && !d.isOverrideable(resultType) {
+			parent := d.parentDependencyContext()
+			for parent != nil {
+				if _, exists := parent.slots.Load(resultType); exists {
+					if parent.locked {
+						panic(fmt.Sprintf("cannot override dependency of type %v from locked parent context", resultType))
+					} else {
+						panic(fmt.Sprintf("generator result type %v already exists--a generator may not override an existing slot", resultType))
+					}
+				}
+				parent = parent.parentDependencyContext()
 			}
 		}
 

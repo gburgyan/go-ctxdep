@@ -45,7 +45,7 @@ func Test_ContextSecurity(t *testing.T) {
 	ctxA := NewDependencyContext(context.Background(), gen, &i42)
 
 	i105 := 105
-	ctxB := NewDependencyContext(ctxA, &i105)
+	ctxB := NewDependencyContext(ctxA, WithOverrides(), &i105)
 
 	assert.Equal(t, "42", *Get[*string](ctxB))
 }

@@ -220,7 +220,7 @@ func TestNestedContextCleanup(t *testing.T) {
 	parentCtx := NewDependencyContext(ctx, WithCleanup(), parentCloser)
 
 	// Create child context
-	childCtx := NewDependencyContext(parentCtx, WithCleanup(), childCloser)
+	childCtx := NewDependencyContext(parentCtx, WithCleanup(), WithOverrides(), childCloser)
 
 	// Cleanup child first
 	childCtx.Cleanup()

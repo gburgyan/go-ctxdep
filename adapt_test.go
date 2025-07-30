@@ -1263,8 +1263,8 @@ func TestAdapterReuseAcrossContexts(t *testing.T) {
 	parentCtx := NewDependencyContext(context.Background(), db, Adapt[UserAdapter](lookupUser))
 
 	// Create child contexts
-	child1 := NewDependencyContext(parentCtx, &TestDatabase{Name: "child1"}, &TestConfig{APIKey: "child1"})
-	child2 := NewDependencyContext(parentCtx, &TestDatabase{Name: "child2"}, &TestConfig{APIKey: "child2"})
+	child1 := NewDependencyContext(parentCtx, WithOverrides(), &TestDatabase{Name: "child1"}, &TestConfig{APIKey: "child1"})
+	child2 := NewDependencyContext(parentCtx, WithOverrides(), &TestDatabase{Name: "child2"}, &TestConfig{APIKey: "child2"})
 
 	// Get adapter from children
 	childAdapter1 := Get[UserAdapter](child1)

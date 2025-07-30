@@ -31,8 +31,27 @@ type ContextOption func(*DependencyContext)
 // if there are multiple dependencies that can fill a slot, the last concrete slot value
 // will be used. In case there is no concrete value, the last generator will win.
 // This is useful for testing scenarios where you want to override specific dependencies.
+// This option will panic if used on a context whose parent is locked.
 func WithOverrides() ContextOption {
 	return func(dc *DependencyContext) {
+		// Check if any parent context is locked
+		parent := dc.parentContext
+		for parent != nil {
+			if pdc, ok := parent.(*DependencyContext); ok {
+				if pdc.locked {
+					panic("cannot use WithOverrides on a context with a locked parent")
+				}
+				parent = pdc.parentContext
+			} else {
+				// If we encounter a non-DependencyContext, check its value
+				if val := parent.Value(dependencyContextKey); val != nil {
+					if pdc, ok := val.(*DependencyContext); ok && pdc.locked {
+						panic("cannot use WithOverrides on a context with a locked parent")
+					}
+				}
+				break
+			}
+		}
 		dc.loose = true
 	}
 }
@@ -60,6 +79,16 @@ func WithCleanupFunc[T any](cleanup CleanupFunc[T]) ContextOption {
 		var zero T
 		cleanupType := reflect.TypeOf(&zero).Elem()
 		dc.cleanupFuncs.Store(cleanupType, cleanup)
+	}
+}
+
+// WithLock locks the dependency context, preventing any child contexts from using
+// WithOverrides(). This is useful in production environments to ensure dependencies
+// cannot be accidentally overridden. Dependencies marked with Overrideable() can
+// still be overridden even in locked contexts.
+func WithLock() ContextOption {
+	return func(dc *DependencyContext) {
+		dc.locked = true
 	}
 }
 
@@ -268,4 +297,17 @@ func NewDependencyContextWithValidation(ctx context.Context, args ...any) (*Depe
 func Status(ctx context.Context) string {
 	dc := GetDependencyContext(ctx)
 	return dc.Status()
+}
+
+// Lock locks the dependency context found in the given context, preventing any child
+// contexts from using WithOverrides(). This is a convenience function that finds the
+// DependencyContext and calls Lock() on it.
+//
+// This is useful in production code to ensure dependencies cannot be overridden:
+//
+//	ctx := setupApplication()
+//	ctxdep.Lock(ctx)  // Lock the context for production use
+func Lock(ctx context.Context) {
+	dc := GetDependencyContext(ctx)
+	dc.Lock()
 }

@@ -1141,6 +1141,108 @@ When constructing a context with `WithOverrides()`, you can freely override conc
 
 For backward compatibility, `NewLooseDependencyContext` is still available but is deprecated in favor of using `NewDependencyContext` with `WithOverrides()`.
 
+## Context locking
+
+In production environments, you may want to prevent accidental overriding of dependencies. There are two ways to lock a context:
+
+### Using WithLock() option
+
+The `WithLock()` option locks a context at creation time:
+
+```Go
+// Production setup with locked context
+prodCtx := ctxdep.NewDependencyContext(ctx,
+    ctxdep.WithLock(),  // Lock this context
+    database,
+    logger,
+    config,
+)
+
+// This will panic - cannot use WithOverrides() on locked parent
+testCtx := ctxdep.NewDependencyContext(prodCtx, ctxdep.WithOverrides(), mockDB)
+
+// This is fine - adding new dependencies without overrides
+childCtx := ctxdep.NewDependencyContext(prodCtx, userService)
+```
+
+### Using Lock() method
+
+The `Lock()` method allows you to lock a context after creation, which is useful when the same context creation code is used in both tests and production:
+
+```Go
+// Shared function that creates a context
+func CreateAppContext() *ctxdep.DependencyContext {
+    return ctxdep.NewDependencyContext(context.Background(),
+        database,
+        logger,
+        config,
+    )
+}
+
+// In tests - leave unlocked for flexibility
+testCtx := CreateAppContext()
+mockCtx := ctxdep.NewDependencyContext(testCtx, ctxdep.WithOverrides(), mockDB)
+
+// In production - lock after creation
+prodCtx := CreateAppContext()
+prodCtx.Lock()  // or ctxdep.Lock(prodCtx)
+// Now overrides will panic
+```
+
+Context locking provides an additional layer of safety in production by ensuring critical dependencies cannot be accidentally overridden, even if someone tries to use `WithOverrides()`. Once locked, a context cannot be unlocked.
+
+## Overrideable dependencies
+
+Sometimes you need certain dependencies (like loggers) to be replaceable even in locked contexts. The `Overrideable()` wrapper allows specific dependencies to be marked as always overrideable.
+
+A common use case is with logging libraries like Go's `slog` package, where you often want to add context to a logger by calling methods like `With()` which return a new logger instance:
+
+```Go
+// Common pattern with slog
+logger := slog.Default()
+requestLogger := logger.With("request_id", requestID, "user_id", userID)
+```
+
+With ctxdep, you can make the logger overrideable to support this pattern:
+
+```Go
+// Mark logger as overrideable even in locked contexts
+ctx := ctxdep.NewDependencyContext(ctx,
+    ctxdep.WithLock(),                         // Lock the context
+    ctxdep.Overrideable(slog.Default()),      // But logger can be overridden
+    database,                                  // Database cannot be overridden
+)
+
+// This works - logger is overrideable
+requestLogger := logger.With("request_id", requestID)
+childCtx := ctxdep.NewDependencyContext(ctx, requestLogger)
+
+// This panics - database is not overrideable in locked context
+errorCtx := ctxdep.NewDependencyContext(ctx, mockDatabase)
+```
+
+### Key points about overrideable dependencies:
+
+1. **Declaration timing**: Dependencies must be marked as overrideable when first introduced. You cannot retroactively make an existing dependency overrideable.
+
+2. **Works with generators**: Both direct dependencies and generators can be marked as overrideable:
+   ```Go
+   ctx := ctxdep.NewDependencyContext(ctx,
+       ctxdep.Overrideable(loggerGenerator), // Generator outputs will be overrideable
+       ctxdep.Overrideable(&Logger{}),       // Direct dependency
+   )
+   ```
+
+3. **Inheritance**: Overrideable status is checked up the entire context chain - if any parent marked the type as overrideable, it remains overrideable in child contexts.
+
+4. **Common use cases**:
+   - Loggers that need different implementations in tests
+   - Feature flags that change between environments
+   - Metrics collectors that may be disabled in tests
+   - Any dependency that legitimately needs to vary while maintaining production safety
+
+This feature provides fine-grained control over which dependencies can be overridden, allowing flexibility where needed while maintaining strict control over critical dependencies.
+
 ## Overriding the parent context
 
 In certain cases you need to reuse a parent context because whatever created the context you have did not properly copy the context. We've encountered this with gRPC services having a parent context of `context.Background()` on goroutines that are created to service requests. If you pass a context as the first dependency parameter when you `NewDependencyContext`, you can override where parent dependencies are looked up. Note that this only works when you pass the context as the first real parameter to `NewDependencyContext`. This works even if the first real parameter is inside a slice that has been passed in at initialization.
