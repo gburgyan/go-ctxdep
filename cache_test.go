@@ -31,10 +31,8 @@ type outputValue struct {
 }
 
 type DumbCache struct {
-	values      map[string][]any
-	lockCount   int
-	unlockCount int
-	lastTtl     time.Duration
+	values  map[string][]any
+	lastTtl time.Duration
 }
 
 func (d *DumbCache) Get(ctx context.Context, key string) []any {

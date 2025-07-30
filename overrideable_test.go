@@ -141,14 +141,12 @@ func TestOverrideable(t *testing.T) {
 		// Should be able to override logger but not database
 		child := NewDependencyContext(parent, logger2)
 
-		var resultLogger *LockTestLogger
-		resultLogger = Get[*LockTestLogger](child)
+		resultLogger := Get[*LockTestLogger](child)
 
 		assert.Equal(t, "logger2", resultLogger.name)
 
 		// Database should still be from parent
-		var resultDB *LockTestDatabase
-		resultDB = Get[*LockTestDatabase](child)
+		resultDB := Get[*LockTestDatabase](child)
 
 		assert.Equal(t, "main", resultDB.conn)
 	})
@@ -185,8 +183,7 @@ func TestOverrideable(t *testing.T) {
 		// Should be able to override with another generator
 		child := NewDependencyContext(parent, genLogger2)
 
-		var result *LockTestLogger
-		result = Get[*LockTestLogger](child)
+		result := Get[*LockTestLogger](child)
 
 		assert.Equal(t, "gen2", result.name)
 	})
@@ -207,8 +204,7 @@ func TestOverrideable(t *testing.T) {
 		// Should still be overrideable in child
 		child := NewDependencyContext(parent, logger3)
 
-		var result *LockTestLogger
-		result = Get[*LockTestLogger](child)
+		result := Get[*LockTestLogger](child)
 
 		assert.Equal(t, "logger3", result.name)
 	})
@@ -228,12 +224,10 @@ func TestOverrideable(t *testing.T) {
 		// Should be able to override both
 		child := NewDependencyContext(parent, newLogger, newDB)
 
-		var resultLogger *LockTestLogger
-		resultLogger = Get[*LockTestLogger](child)
+		resultLogger := Get[*LockTestLogger](child)
 		assert.Equal(t, "newLogger", resultLogger.name)
 
-		var resultDB *LockTestDatabase
-		resultDB = Get[*LockTestDatabase](child)
+		resultDB := Get[*LockTestDatabase](child)
 		assert.Equal(t, "newDB", resultDB.conn)
 	})
 

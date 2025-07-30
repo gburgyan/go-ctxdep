@@ -267,7 +267,7 @@ func TestAdapterNoContextParameter(t *testing.T) {
 
 	adapter := Get[UserAdapter](ctx)
 	// This should panic when trying to call the adapter
-	adapter(ctx, "test")
+	_, _ = adapter(ctx, "test")
 }
 
 func TestAdapterAllDependenciesFromContext(t *testing.T) {

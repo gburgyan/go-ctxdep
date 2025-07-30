@@ -12,10 +12,6 @@ type adaptWrapper struct {
 	originalFunc any
 	// The type of the adapted function that will be returned (e.g., UserAdapter)
 	targetType reflect.Type
-	// Indices of parameters that come from context
-	contextParamIndices []int
-	// Indices of parameters that come from the adapted function call
-	adaptParamIndices []int
 	// The return type info
 	returnTypes []reflect.Type
 	// Whether this adapted function returns an error as last value

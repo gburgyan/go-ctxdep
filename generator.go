@@ -60,7 +60,6 @@ func (d *DependencyContext) addGenerator(generatorFunction any, immediate *immed
 		}
 		d.slots.Store(resultType, s)
 	}
-	return
 }
 
 // getGeneratorError finds the error result from a generator, if it exists. If no error is present,

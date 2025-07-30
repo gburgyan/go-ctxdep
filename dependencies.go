@@ -145,14 +145,6 @@ func (d *DependencyContext) addDependenciesAndInitialize(ctx context.Context, de
 	return nil
 }
 
-// validateDependencies ensures that everything that was added is in a consistent state. If
-// any dependencies exist that can't be fulfilled, this will `panic`.
-func (d *DependencyContext) validateDependencies() {
-	if err := d.validateDependenciesWithError(); err != nil {
-		panic(err.Error())
-	}
-}
-
 // validateDependenciesWithError ensures that everything that was added is in a consistent state. If
 // any dependencies exist that can't be fulfilled, this will return an error.
 func (d *DependencyContext) validateDependenciesWithError() error {
