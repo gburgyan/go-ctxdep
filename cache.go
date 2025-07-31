@@ -424,11 +424,7 @@ func shouldPreRefresh(state *cacheState, ttl time.Duration, savedTime time.Time)
 	age := state.opts.now().Sub(savedTime).Seconds()
 	percentage := age / ttl.Seconds()
 
-	if percentage < state.opts.RefreshPercentage {
-		return false
-	}
-
-	return true
+	return percentage >= state.opts.RefreshPercentage
 }
 
 // cacheState represents the state of the cache for a given generator function.

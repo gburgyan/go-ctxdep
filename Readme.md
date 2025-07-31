@@ -36,6 +36,8 @@ It builds on top of the existing `context.Context` features of Go offering some 
 
 By relying on the existing context framework of Go, it allows conveniently side-steps the need to have many of the features that dependency injection frameworks need. Instead, it uses the same features that Go programmers are already familiar with.
 
+**Note:** `NewDependencyContext` now returns a `*DependencyContext` that implements the `context.Context` interface, allowing you to use it anywhere a context is expected while also providing direct access to methods like `Cleanup()`.
+
 # Usage
 
 ## Basic usage
@@ -48,8 +50,8 @@ type MyData struct {
 }
 
 func Processor(ctx context.Context) {
-    ctx = ctxdep.NewDependencyContext(ctx, &MyData{data:"for later"})
-    client(ctx)
+    dc := ctxdep.NewDependencyContext(ctx, &MyData{data:"for later"})
+    client(dc)
 }
 
 func client(ctx context.Context) {
@@ -77,8 +79,8 @@ func componentBDeps() []any {
 }
 
 func Processor(ctx context.Context) {
-    ctx = ctxdep.NewDependencyContext(ctx, componentADeps(), componentBDeps())
-    client(ctx)
+    dc := ctxdep.NewDependencyContext(ctx, componentADeps(), componentBDeps())
+    client(dc)
 }
 
 ```
@@ -100,8 +102,8 @@ func (s *ServiceCaller) Call(i int) int {
 }
 
 func Processor(ctx context.Context) {
-    ctx = ctxdep.NewDependencyContext(ctx, &ServiceCaller{})
-    client(ctx)
+    dc := ctxdep.NewDependencyContext(ctx, &ServiceCaller{})
+    client(dc)
 }
 
 func client(ctx context.Context) {
@@ -289,9 +291,9 @@ Even if multiple clients of the cache trigger a potential refresh, only a single
 
 Dependencies can have cleanup functions that are automatically called when the context is cancelled. This is particularly useful for resources that need to be cleaned up like database connections, file handles, or network connections. This feature is opt-in and must be explicitly enabled using `WithCleanup()` or `WithCleanupFunc()`.
 
-### Automatic cleanup for io.Closer
+### Explicit cleanup for io.Closer
 
-Any dependency that implements the `io.Closer` interface will have its `Close()` method called when the context is cancelled, but only if cleanup is enabled:
+Any dependency that implements the `io.Closer` interface will have its `Close()` method called when you explicitly call `Cleanup()` on the dependency context, but only if cleanup is enabled:
 
 ```Go
 type DatabaseConnection struct {
@@ -303,17 +305,17 @@ func (dc *DatabaseConnection) Close() error {
 }
 
 func main() {
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel() // This will trigger cleanup
+    ctx := context.Background()
     
     dbConn := &DatabaseConnection{conn: openDB()}
-    ctx = ctxdep.NewDependencyContext(ctx, 
-        ctxdep.WithCleanup(), // Enable automatic cleanup
+    dc := ctxdep.NewDependencyContext(ctx, 
+        ctxdep.WithCleanup(), // Enable cleanup functionality
         dbConn,
     )
+    defer dc.Cleanup() // Cleanup when function returns
     
     // Use the database connection
-    // When cancel() is called, dbConn.Close() will be called automatically
+    // When the function returns, dbConn.Close() will be called
 }
 ```
 
@@ -334,30 +336,549 @@ func cleanupService(s *Service) {
 }
 
 func main() {
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
+    ctx := context.Background()
     
     service := &Service{workers: startWorkers()}
-    ctx = ctxdep.NewDependencyContext(ctx,
+    dc := ctxdep.NewDependencyContext(ctx,
         ctxdep.WithCleanupFunc(cleanupService),
         service,
     )
+    defer dc.Cleanup() // Explicitly cleanup when done
     
-    // When cancel() is called, cleanupService will be invoked
+    // When the function returns, cleanupService will be invoked
 }
 ```
+
+## Adapter Functions
+
+The library supports adapter functions that allow you to create partially applied functions where some parameters are filled from the dependency context while others are provided at call time.
+
+### Basic adapter usage
+
+```Go
+type Database interface {
+    GetUser(ctx context.Context, id string) (*User, error)
+}
+
+type User struct {
+    ID    string
+    Name  string
+    Email string
+}
+
+// Define an adapter type
+type UserAdapter func(ctx context.Context, userID string) (*User, error)
+
+// Create a function that needs dependencies
+func lookupUser(ctx context.Context, db Database, userID string) (*User, error) {
+    return db.GetUser(ctx, userID)
+}
+
+func main() {
+    ctx := context.Background()
+    db := connectToDatabase() // Returns Database implementation
+    
+    // Register the adapter
+    ctx = ctxdep.NewDependencyContext(ctx,
+        db,
+        ctxdep.Adapt[UserAdapter](lookupUser),
+    )
+    
+    // Get and use the adapter
+    adapter := ctxdep.Get[UserAdapter](ctx)
+    user, err := adapter(ctx, "user123")
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Found user: %+v\n", user)
+}
+```
+
+### Adapters with multiple dependencies
+
+Adapters can use multiple dependencies from the context:
+
+```Go
+type Config struct {
+    APIKey string
+}
+
+type ComplexAdapter func(ctx context.Context, operation string, value int) (string, error)
+
+func complexOperation(ctx context.Context, db Database, cfg *Config, operation string, value int) (string, error) {
+    // Use both db and cfg along with the provided parameters
+    user, _ := db.GetUser(ctx, cfg.APIKey)
+    return fmt.Sprintf("%s: %s processed %d", operation, user.Name, value), nil
+}
+
+func main() {
+    ctx := context.Background()
+    db := connectToDatabase()
+    cfg := &Config{APIKey: "admin"}
+    
+    ctx = ctxdep.NewDependencyContext(ctx,
+        db,
+        cfg,
+        ctxdep.Adapt[ComplexAdapter](complexOperation),
+    )
+    
+    adapter := ctxdep.Get[ComplexAdapter](ctx)
+    result, _ := adapter(ctx, "process", 42)
+    fmt.Println(result) // "process: Admin processed 42"
+}
+```
+
+### Adapter validation
+
+Adapters are validated during context initialization to ensure:
+- All dependencies required by the original function can be resolved from the context
+- The parameter and return types match between the adapter type and the original function
+- The adapter type includes a `context.Context` parameter if the original function has one
+
+```Go
+// This will panic during context creation because Config is not available
+ctx = ctxdep.NewDependencyContext(ctx,
+    db, // Missing cfg!
+    ctxdep.Adapt[ComplexAdapter](complexOperation),
+)
+```
+
+### Important notes about adapters
+
+1. Adapters cannot be used as generators for other dependencies - they are specifically for creating partially applied functions
+2. For security reasons, adapters capture dependencies from the context where they were created, not from the context passed when calling the adapter. This prevents child contexts from overriding dependencies that the adapter depends on
+3. All validation happens during `NewDependencyContext`, ensuring runtime safety
+
+### Using anonymous function types
+
+While named function types (like `UserAdapter`) are recommended for clarity and maintainability, you can also use anonymous function types with adapters:
+
+```Go
+// Using anonymous function type
+ctx = ctxdep.NewDependencyContext(ctx,
+    db,
+    ctxdep.Adapt[func(context.Context, string) (*User, error)](lookupUser),
+)
+
+// Retrieve with the same anonymous type
+adapter := ctxdep.Get[func(context.Context, string) (*User, error)](ctx)
+```
+
+**Important notes about anonymous function types:**
+
+- Go considers anonymous function types identical based on their signature, not parameter names
+- `func(ctx context.Context, id string) (*User, error)` and `func(context.Context, string) (*User, error)` are the same type
+- Type aliases work as expected: `type MyFunc = func(context.Context, string) (*User, error)` can be used interchangeably with the expanded form
+- The `Status()` output shows anonymous function types as their full signature
+
+### Difference from regular function dependencies
+
+Regular functions can be stored as dependencies (as pointers), but they don't provide partial application:
+
+```Go
+// Regular function stored as dependency
+regularFunc := func(id string) *User { 
+    return &User{ID: id} 
+}
+ctx = ctxdep.NewDependencyContext(ctx, &regularFunc)
+
+// Retrieved as pointer
+fn := ctxdep.Get[*func(string) *User](ctx)
+user := (*fn)("123")  // Note: no dependency injection happens
+
+// Adapter function - provides partial application
+ctx = ctxdep.NewDependencyContext(ctx,
+    db,
+    ctxdep.Adapt[func(context.Context, string) (*User, error)](lookupUser),
+)
+adapter := ctxdep.Get[func(context.Context, string) (*User, error)](ctx)
+user, err := adapter(ctx, "123")  // db is injected from context
+```
+
+## Validation
+
+The library supports running validation functions during context creation. This is useful for ensuring that all dependencies meet certain criteria before proceeding with application logic.
+
+### Basic validation usage
+
+Validators are functions that return an error. They can take any dependencies from the context as parameters:
+
+```go
+// Define a validator function
+func validateUser(ctx context.Context, user *User) error {
+    if user.Age < 18 {
+        return errors.New("user must be 18 or older")
+    }
+    return nil
+}
+
+// Create context with validation
+ctx, err := ctxdep.NewDependencyContextWithValidation(parentCtx,
+    &User{Name: "John", Age: 25},
+    ctxdep.Validate(validateUser),
+)
+if err != nil {
+    // Validation failed
+    log.Fatal(err)
+}
+
+// If we get here, validation passed
+user := ctxdep.Get[*User](ctx)
+```
+
+### Multiple validators
+
+You can register multiple validators, and they will all be run:
+
+```go
+func validateAge(ctx context.Context, user *User) error {
+    if user.Age < 18 {
+        return errors.New("user must be 18 or older")
+    }
+    return nil
+}
+
+func validateEmail(ctx context.Context, user *User) error {
+    if !strings.Contains(user.Email, "@") {
+        return errors.New("invalid email format")
+    }
+    return nil
+}
+
+ctx, err := ctxdep.NewDependencyContextWithValidation(parentCtx,
+    user,
+    ctxdep.Validate(validateAge),
+    ctxdep.Validate(validateEmail),
+)
+```
+
+### Validators with dependencies
+
+Validators can use multiple dependencies from the context:
+
+```go
+func validateOrderLimit(ctx context.Context, user *User, db *Database, order *Order) error {
+    // Check user's order history
+    count, err := db.GetUserOrderCount(ctx, user.ID)
+    if err != nil {
+        return err
+    }
+    
+    if count >= 100 {
+        return errors.New("user has reached order limit")
+    }
+    
+    // Validate order total
+    if order.Total > user.CreditLimit {
+        return errors.New("order exceeds credit limit")
+    }
+    
+    return nil
+}
+
+ctx, err := ctxdep.NewDependencyContextWithValidation(parentCtx,
+    user,
+    db,
+    order,
+    ctxdep.Validate(validateOrderLimit),
+)
+```
+
+### Validation with adapters
+
+Validators work seamlessly with adapted functions:
+
+```go
+type OrderValidator func(ctx context.Context, orderID string) error
+
+func validateOrderExists(ctx context.Context, db *Database, orderID string) error {
+    exists, err := db.OrderExists(ctx, orderID)
+    if err != nil {
+        return err
+    }
+    if !exists {
+        return errors.New("order not found")
+    }
+    return nil
+}
+
+// Validator that uses an adapted function
+func validateOrder(ctx context.Context, orderID string, validator OrderValidator) error {
+    return validator(ctx, orderID)
+}
+
+ctx, err := ctxdep.NewDependencyContextWithValidation(parentCtx,
+    db,
+    orderID,
+    ctxdep.Adapt[OrderValidator](validateOrderExists),
+    ctxdep.Validate(validateOrder),
+)
+```
+
+### Important notes about validation
+
+1. **Validation runs after dependency setup**: All dependencies are initialized and adapters are processed before validators run.
+2. **Validation runs before immediate dependencies**: Validators run before any immediate generator execution.
+3. **First error stops validation**: If a validator returns an error, subsequent validators are not run.
+4. **Backward compatibility**: The original `NewDependencyContext` still panics on validation errors, maintaining backward compatibility.
+5. **Validators are not dependencies**: After validation completes, validators are removed from the context and cannot be retrieved with `Get()`.
+
+### When to use validation
+
+Validation is particularly useful for:
+
+- **Request validation**: Validate incoming API requests before processing
+- **Business rule enforcement**: Ensure business invariants are maintained
+- **Configuration validation**: Verify configuration values meet requirements
+- **State validation**: Check that the system is in a valid state before proceeding
+
+```go
+// Example: API handler with validation
+func CreateOrderHandler(w http.ResponseWriter, r *http.Request) {
+    var orderRequest CreateOrderRequest
+    json.NewDecoder(r.Body).Decode(&orderRequest)
+    
+    ctx, err := ctxdep.NewDependencyContextWithValidation(r.Context(),
+        &orderRequest,
+        ctxdep.Get[*User](r.Context()),
+        ctxdep.Get[*Database](r.Context()),
+        ctxdep.Validate(validateOrderRequest),
+        ctxdep.Validate(validateUserCanOrder),
+        ctxdep.Validate(validateInventory),
+    )
+    
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+    
+    // Process the valid order...
+}
+```
+
+## Testing with Adapters
+
+One of the most powerful applications of adapters is in testing. Let's look at a real-world example that shows how adapters solve common testing challenges.
+
+### The Problem: Testing Database-Dependent Code
+
+Consider a typical business function that needs to fetch user permissions:
+
+```Go
+// Traditional approach - hard to test
+type PermissionService struct {
+    db *sql.DB
+}
+
+func (s *PermissionService) CheckUserPermission(userID, resource string) (bool, error) {
+    var hasPermission bool
+    err := s.db.QueryRow(
+        "SELECT EXISTS(SELECT 1 FROM permissions WHERE user_id = ? AND resource = ?)",
+        userID, resource,
+    ).Scan(&hasPermission)
+    return hasPermission, err
+}
+
+func (s *PermissionService) CanUserEditDocument(userID, documentID string) (bool, error) {
+    // This is what we want to test, but it's tightly coupled to the database
+    doc, err := s.getDocument(documentID)
+    if err != nil {
+        return false, err
+    }
+    
+    if doc.OwnerID == userID {
+        return true, nil
+    }
+    
+    return s.CheckUserPermission(userID, "documents:edit")
+}
+```
+
+Testing `CanUserEditDocument` traditionally requires either:
+1. **A real database** - slow, requires setup/teardown, can't run in parallel
+2. **Mocking frameworks** - verbose, brittle, requires interfaces for everything
+3. **Global state** - makes parallel testing impossible, hidden dependencies
+
+### The Solution: Adapters for Clean Testing
+
+With adapters, we can cleanly separate the database access from the business logic:
+
+```Go
+// Define our adapter types
+type PermissionChecker func(ctx context.Context, userID, resource string) (bool, error)
+type DocumentGetter func(ctx context.Context, documentID string) (*Document, error)
+
+// Implement the actual database functions
+func checkPermissionDB(ctx context.Context, db *sql.DB, userID, resource string) (bool, error) {
+    var hasPermission bool
+    err := db.QueryRow(
+        "SELECT EXISTS(SELECT 1 FROM permissions WHERE user_id = ? AND resource = ?)",
+        userID, resource,
+    ).Scan(&hasPermission)
+    return hasPermission, err
+}
+
+func getDocumentDB(ctx context.Context, db *sql.DB, documentID string) (*Document, error) {
+    // ... database query to get document
+}
+
+// Our business logic now uses adapters instead of direct DB access
+func CanUserEditDocument(ctx context.Context, userID, documentID string) (bool, error) {
+    // Get our adapters from the context
+    checkPermission := ctxdep.Get[PermissionChecker](ctx)
+    getDocument := ctxdep.Get[DocumentGetter](ctx)
+    
+    // Business logic remains the same, but now it's decoupled
+    doc, err := getDocument(ctx, documentID)
+    if err != nil {
+        return false, err
+    }
+    
+    if doc.OwnerID == userID {
+        return true, nil
+    }
+    
+    return checkPermission(ctx, userID, "documents:edit")
+}
+
+// In production, set up with real database
+func setupProduction(db *sql.DB) context.Context {
+    ctx := context.Background()
+    return ctxdep.NewDependencyContext(ctx,
+        db,
+        ctxdep.Adapt[PermissionChecker](checkPermissionDB),
+        ctxdep.Adapt[DocumentGetter](getDocumentDB),
+    )
+}
+```
+
+### Testing Becomes Trivial
+
+Now testing is clean and doesn't require any mocking frameworks:
+
+```Go
+func TestCanUserEditDocument(t *testing.T) {
+    tests := []struct {
+        name          string
+        userID        string
+        documentID    string
+        setupContext  func() context.Context
+        expectedAllow bool
+        expectedError bool
+    }{
+        {
+            name:       "owner can edit",
+            userID:     "user123",
+            documentID: "doc456",
+            setupContext: func() context.Context {
+                // No database needed - just return what we need for the test
+                getDoc := func(ctx context.Context, docID string) (*Document, error) {
+                    return &Document{ID: docID, OwnerID: "user123"}, nil
+                }
+                checkPerm := func(ctx context.Context, userID, resource string) (bool, error) {
+                    t.Fatal("should not check permissions for owner")
+                    return false, nil
+                }
+                
+                return ctxdep.NewDependencyContext(context.Background(),
+                    ctxdep.Adapt[DocumentGetter](getDoc),
+                    ctxdep.Adapt[PermissionChecker](checkPerm),
+                )
+            },
+            expectedAllow: true,
+        },
+        {
+            name:       "non-owner with permission",
+            userID:     "user789",
+            documentID: "doc456",
+            setupContext: func() context.Context {
+                getDoc := func(ctx context.Context, docID string) (*Document, error) {
+                    return &Document{ID: docID, OwnerID: "user123"}, nil
+                }
+                checkPerm := func(ctx context.Context, userID, resource string) (bool, error) {
+                    if userID == "user789" && resource == "documents:edit" {
+                        return true, nil
+                    }
+                    return false, nil
+                }
+                
+                return ctxdep.NewDependencyContext(context.Background(),
+                    ctxdep.Adapt[DocumentGetter](getDoc),
+                    ctxdep.Adapt[PermissionChecker](checkPerm),
+                )
+            },
+            expectedAllow: true,
+        },
+        {
+            name:       "database error",
+            userID:     "user789",
+            documentID: "doc456",
+            setupContext: func() context.Context {
+                getDoc := func(ctx context.Context, docID string) (*Document, error) {
+                    return nil, errors.New("database connection lost")
+                }
+                checkPerm := func(ctx context.Context, userID, resource string) (bool, error) {
+                    return false, nil
+                }
+                
+                return ctxdep.NewDependencyContext(context.Background(),
+                    ctxdep.Adapt[DocumentGetter](getDoc),
+                    ctxdep.Adapt[PermissionChecker](checkPerm),
+                )
+            },
+            expectedAllow: false,
+            expectedError: true,
+        },
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            ctx := tt.setupContext()
+            
+            allowed, err := CanUserEditDocument(ctx, tt.userID, tt.documentID)
+            
+            if tt.expectedError && err == nil {
+                t.Error("expected error but got none")
+            }
+            if !tt.expectedError && err != nil {
+                t.Errorf("unexpected error: %v", err)
+            }
+            if allowed != tt.expectedAllow {
+                t.Errorf("expected allowed=%v but got %v", tt.expectedAllow, allowed)
+            }
+        })
+    }
+}
+```
+
+### Key Advantages
+
+1. **No Mocking Frameworks** - Just simple functions that return what you need
+2. **Parallel Testing** - Each test has its own context, no shared state
+3. **Clear Test Intent** - The test setup clearly shows what each dependency will do
+4. **Type Safety** - The compiler ensures your test adapters match the expected signatures
+5. **No Abstraction Breaking** - The business logic doesn't know it's being tested
+6. **Lazy Evaluation** - Database connections are only made if actually needed
+
+Compare this to traditional approaches:
+- **With interfaces everywhere**: Requires changing production code structure for testing
+- **With mocking frameworks**: Verbose setup, runtime reflection, less clear intent
+- **With global variables**: Can't run tests in parallel, hidden dependencies
+
+The adapter pattern preserves the natural structure of your code while making it completely testable.
 
 ### Cleanup behavior
 
 - Cleanup must be explicitly enabled with `WithCleanup()` or `WithCleanupFunc()`
-- Cleanup functions are called exactly once, even if the context is cancelled multiple times
-- Cleanup happens asynchronously when the context is cancelled
+- Cleanup is performed by explicitly calling `Cleanup()` on the returned dependency context, typically with `defer`
+- Cleanup functions are called exactly once, even if `Cleanup()` is called multiple times on the same context
+- Cleanup happens synchronously when `Cleanup()` is called
 - Dependencies created by generators are also cleaned up
-- Nested contexts properly clean up their own dependencies
+- Each context manages its own dependencies - calling `Cleanup()` on a child context doesn't affect the parent
 - Custom cleanup functions take precedence over automatic `io.Closer` cleanup
 - Using `WithCleanupFunc()` automatically enables cleanup for all dependencies
 
-This opt-in design ensures zero overhead for applications that don't need cleanup functionality, while providing robust resource management for those that do.
+This explicit cleanup design gives you full control over when resources are released, preventing race conditions that could occur with automatic cleanup based on context cancellation.
 
 # Why all this is important
 
@@ -436,8 +957,8 @@ func Test_isPermitted(t *testing.T) {
         Name:    "George Burgyan",
         IsAdmin: true,
     }
-    ctx := ctxdep.NewDependencyContext(contest.Background(), user)
-    permitted := isPermitted(ctx)
+    dc := ctxdep.NewDependencyContext(context.Background(), user)
+    permitted := isPermitted(dc)
     assert.True(t, permitted)    
 }
 ```
@@ -619,6 +1140,108 @@ ctx := ctxdep.NewDependencyContext(ctx,
 When constructing a context with `WithOverrides()`, you can freely override concrete values and generators; the last one added will be used. In case that there are both generators and concrete values, the last value will be used; a generator will never override a value.
 
 For backward compatibility, `NewLooseDependencyContext` is still available but is deprecated in favor of using `NewDependencyContext` with `WithOverrides()`.
+
+## Context locking
+
+In production environments, you may want to prevent accidental overriding of dependencies. There are two ways to lock a context:
+
+### Using WithLock() option
+
+The `WithLock()` option locks a context at creation time:
+
+```Go
+// Production setup with locked context
+prodCtx := ctxdep.NewDependencyContext(ctx,
+    ctxdep.WithLock(),  // Lock this context
+    database,
+    logger,
+    config,
+)
+
+// This will panic - cannot use WithOverrides() on locked parent
+testCtx := ctxdep.NewDependencyContext(prodCtx, ctxdep.WithOverrides(), mockDB)
+
+// This is fine - adding new dependencies without overrides
+childCtx := ctxdep.NewDependencyContext(prodCtx, userService)
+```
+
+### Using Lock() method
+
+The `Lock()` method allows you to lock a context after creation, which is useful when the same context creation code is used in both tests and production:
+
+```Go
+// Shared function that creates a context
+func CreateAppContext() *ctxdep.DependencyContext {
+    return ctxdep.NewDependencyContext(context.Background(),
+        database,
+        logger,
+        config,
+    )
+}
+
+// In tests - leave unlocked for flexibility
+testCtx := CreateAppContext()
+mockCtx := ctxdep.NewDependencyContext(testCtx, ctxdep.WithOverrides(), mockDB)
+
+// In production - lock after creation
+prodCtx := CreateAppContext()
+prodCtx.Lock()  // or ctxdep.Lock(prodCtx)
+// Now overrides will panic
+```
+
+Context locking provides an additional layer of safety in production by ensuring critical dependencies cannot be accidentally overridden, even if someone tries to use `WithOverrides()`. Once locked, a context cannot be unlocked.
+
+## Overrideable dependencies
+
+Sometimes you need certain dependencies (like loggers) to be replaceable even in locked contexts. The `Overrideable()` wrapper allows specific dependencies to be marked as always overrideable.
+
+A common use case is with logging libraries like Go's `slog` package, where you often want to add context to a logger by calling methods like `With()` which return a new logger instance:
+
+```Go
+// Common pattern with slog
+logger := slog.Default()
+requestLogger := logger.With("request_id", requestID, "user_id", userID)
+```
+
+With ctxdep, you can make the logger overrideable to support this pattern:
+
+```Go
+// Mark logger as overrideable even in locked contexts
+ctx := ctxdep.NewDependencyContext(ctx,
+    ctxdep.WithLock(),                         // Lock the context
+    ctxdep.Overrideable(slog.Default()),      // But logger can be overridden
+    database,                                  // Database cannot be overridden
+)
+
+// This works - logger is overrideable
+requestLogger := logger.With("request_id", requestID)
+childCtx := ctxdep.NewDependencyContext(ctx, requestLogger)
+
+// This panics - database is not overrideable in locked context
+errorCtx := ctxdep.NewDependencyContext(ctx, mockDatabase)
+```
+
+### Key points about overrideable dependencies:
+
+1. **Declaration timing**: Dependencies must be marked as overrideable when first introduced. You cannot retroactively make an existing dependency overrideable.
+
+2. **Works with generators**: Both direct dependencies and generators can be marked as overrideable:
+   ```Go
+   ctx := ctxdep.NewDependencyContext(ctx,
+       ctxdep.Overrideable(loggerGenerator), // Generator outputs will be overrideable
+       ctxdep.Overrideable(&Logger{}),       // Direct dependency
+   )
+   ```
+
+3. **Inheritance**: Overrideable status is checked up the entire context chain - if any parent marked the type as overrideable, it remains overrideable in child contexts.
+
+4. **Common use cases**:
+   - Loggers that need different implementations in tests
+   - Feature flags that change between environments
+   - Metrics collectors that may be disabled in tests
+   - Any dependency that legitimately needs to vary while maintaining production safety
+
+This feature provides fine-grained control over which dependencies can be overridden, allowing flexibility where needed while maintaining strict control over critical dependencies.
 
 ## Overriding the parent context
 

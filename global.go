@@ -31,8 +31,27 @@ type ContextOption func(*DependencyContext)
 // if there are multiple dependencies that can fill a slot, the last concrete slot value
 // will be used. In case there is no concrete value, the last generator will win.
 // This is useful for testing scenarios where you want to override specific dependencies.
+// This option will panic if used on a context whose parent is locked.
 func WithOverrides() ContextOption {
 	return func(dc *DependencyContext) {
+		// Check if any parent context is locked
+		parent := dc.parentContext
+		for parent != nil {
+			if pdc, ok := parent.(*DependencyContext); ok {
+				if pdc.locked {
+					panic("cannot use WithOverrides on a context with a locked parent")
+				}
+				parent = pdc.parentContext
+			} else {
+				// If we encounter a non-DependencyContext, check its value
+				if val := parent.Value(dependencyContextKey); val != nil {
+					if pdc, ok := val.(*DependencyContext); ok && pdc.locked {
+						panic("cannot use WithOverrides on a context with a locked parent")
+					}
+				}
+				break
+			}
+		}
 		dc.loose = true
 	}
 }
@@ -41,8 +60,9 @@ func WithOverrides() ContextOption {
 type CleanupFunc[T any] func(T)
 
 // WithCleanup enables cleanup functionality for the dependency context.
-// When the context is cancelled, dependencies implementing io.Closer will have their
-// Close() method called automatically. This must be called to enable any cleanup behavior.
+// When Cleanup(ctx) is called, dependencies implementing io.Closer will have their
+// Close() method called. This must be used to enable any cleanup behavior.
+// Cleanup is not automatic - you must explicitly call Cleanup(ctx) when done.
 func WithCleanup() ContextOption {
 	return func(dc *DependencyContext) {
 		dc.cleanupEnabled = true
@@ -51,7 +71,7 @@ func WithCleanup() ContextOption {
 
 // WithCleanupFunc registers a custom cleanup function for dependencies of type T.
 // This automatically enables cleanup functionality if not already enabled.
-// The cleanup function will be called when the context is cancelled.
+// The cleanup function will be called when Cleanup(ctx) is explicitly called.
 // Custom cleanup functions take precedence over automatic io.Closer cleanup.
 func WithCleanupFunc[T any](cleanup CleanupFunc[T]) ContextOption {
 	return func(dc *DependencyContext) {
@@ -59,6 +79,16 @@ func WithCleanupFunc[T any](cleanup CleanupFunc[T]) ContextOption {
 		var zero T
 		cleanupType := reflect.TypeOf(&zero).Elem()
 		dc.cleanupFuncs.Store(cleanupType, cleanup)
+	}
+}
+
+// WithLock locks the dependency context, preventing any child contexts from using
+// WithOverrides(). This is useful in production environments to ensure dependencies
+// cannot be accidentally overridden. Dependencies marked with Overrideable() can
+// still be overridden even in locked contexts.
+func WithLock() ContextOption {
+	return func(dc *DependencyContext) {
+		dc.locked = true
 	}
 }
 
@@ -74,10 +104,11 @@ func WithCleanupFunc[T any](cleanup CleanupFunc[T]) ContextOption {
 //
 // Options and dependencies can be mixed in any order. Options are applied first,
 // then dependencies are added.
-func NewDependencyContext(ctx context.Context, args ...any) context.Context {
+func NewDependencyContext(ctx context.Context, args ...any) *DependencyContext {
 	dc := &DependencyContext{
 		parentContext: ctx,
 		slots:         sync.Map{},
+		cleanupFuncs:  sync.Map{},
 	}
 
 	// Separate options from dependencies
@@ -97,16 +128,15 @@ func NewDependencyContext(ctx context.Context, args ...any) context.Context {
 		opt(dc)
 	}
 
-	newContext := context.WithValue(ctx, dependencyContextKey, dc)
-	dc.selfContext = newContext
-	dc.addDependenciesAndInitialize(newContext, dependencies...)
-
-	// Set up cleanup monitoring only if enabled
-	if dc.cleanupEnabled {
-		go dc.monitorContextDone(newContext)
+	// Since DependencyContext now implements context.Context, we use it directly
+	dc.selfContext = dc
+	if err := dc.addDependenciesAndInitialize(dc, dependencies...); err != nil {
+		panic(err.Error())
 	}
 
-	return newContext
+	// No longer starting a monitoring goroutine - cleanup is now explicit
+
+	return dc
 }
 
 // NewLooseDependencyContext adds a new dependency context to the context stack and returns
@@ -118,7 +148,7 @@ func NewDependencyContext(ctx context.Context, args ...any) context.Context {
 // be used. In case there is no concrete value, the last generator will win.
 //
 // Deprecated: Use NewDependencyContext with WithOverrides() option instead.
-func NewLooseDependencyContext(ctx context.Context, dependencies ...any) context.Context {
+func NewLooseDependencyContext(ctx context.Context, dependencies ...any) *DependencyContext {
 	return NewDependencyContext(ctx, append([]any{WithOverrides()}, dependencies...)...)
 }
 
@@ -205,6 +235,58 @@ func GetBatchOptional(ctx context.Context, target ...any) []bool {
 	return results
 }
 
+// NewDependencyContextWithValidation creates a new dependency context like NewDependencyContext,
+// but runs all registered validators before returning. If any validator returns an error,
+// the context creation fails and returns that error.
+//
+// Validators are registered using the Validate() function:
+//
+//	ctx, err := NewDependencyContextWithValidation(parent,
+//	    db,
+//	    order,
+//	    Validate(validateOrder),
+//	)
+//	if err != nil {
+//	    // validation failed
+//	}
+//
+// Validators are run after all dependencies are initialized but before any
+// immediate processing occurs.
+func NewDependencyContextWithValidation(ctx context.Context, args ...any) (*DependencyContext, error) {
+	dc := &DependencyContext{
+		parentContext: ctx,
+		slots:         sync.Map{},
+		cleanupFuncs:  sync.Map{},
+	}
+
+	// Separate options from dependencies
+	var options []ContextOption
+	var dependencies []any
+
+	for _, arg := range args {
+		if opt, ok := arg.(ContextOption); ok {
+			options = append(options, opt)
+		} else {
+			dependencies = append(dependencies, arg)
+		}
+	}
+
+	// Apply options
+	for _, opt := range options {
+		opt(dc)
+	}
+
+	// Since DependencyContext now implements context.Context, we use it directly
+	dc.selfContext = dc
+
+	// Use the same initialization flow, but return the error instead of panicking
+	if err := dc.addDependenciesAndInitialize(dc, dependencies...); err != nil {
+		return nil, err
+	}
+
+	return dc, nil
+}
+
 // Status is a diagnostic tool that returns a string describing the state of the dependency
 // context. The result is each dependency type that is known about, and if it has a value
 // and if it has a generator that is capable of making that value.
@@ -215,4 +297,17 @@ func GetBatchOptional(ctx context.Context, target ...any) []bool {
 func Status(ctx context.Context) string {
 	dc := GetDependencyContext(ctx)
 	return dc.Status()
+}
+
+// Lock locks the dependency context found in the given context, preventing any child
+// contexts from using WithOverrides(). This is a convenience function that finds the
+// DependencyContext and calls Lock() on it.
+//
+// This is useful in production code to ensure dependencies cannot be overridden:
+//
+//	ctx := setupApplication()
+//	ctxdep.Lock(ctx)  // Lock the context for production use
+func Lock(ctx context.Context) {
+	dc := GetDependencyContext(ctx)
+	dc.Lock()
 }

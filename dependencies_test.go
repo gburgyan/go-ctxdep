@@ -395,7 +395,7 @@ func Test_ComplicatedStatus(t *testing.T) {
 	})
 
 	// Make another status from that one
-	c2 := NewDependencyContext(c1, func(in testInterface) *testWidget {
+	c2 := NewDependencyContext(c1, WithOverrides(), func(in testInterface) *testWidget {
 		return &testWidget{Val: in.getVal()}
 	}, &testDoodad{Val: "something cool"})
 

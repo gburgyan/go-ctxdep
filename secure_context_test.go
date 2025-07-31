@@ -8,21 +8,24 @@ import (
 	"time"
 )
 
+type contextKey string
+
 func Test_secureContext(t *testing.T) {
 	ctx := context.Background()
 
-	valCtx1 := context.WithValue(ctx, "ctx1", "val1")
-	cancelCtx, _ := context.WithTimeout(valCtx1, time.Minute)
+	valCtx1 := context.WithValue(ctx, contextKey("ctx1"), "val1")
+	cancelCtx, cancel := context.WithTimeout(valCtx1, time.Minute)
+	defer cancel()
 	cycleCtx := context.WithValue(cancelCtx, cycleKey, &cycleChecker{})
-	valCtx2 := context.WithValue(cycleCtx, "ctx2", "val2")
+	valCtx2 := context.WithValue(cycleCtx, contextKey("ctx2"), "val2")
 
 	secCtx := &secureContext{
 		baseContext:   valCtx1,
 		timingContext: valCtx2,
 	}
 
-	assert.NotNil(t, secCtx.Value("ctx1"))
-	assert.Nil(t, secCtx.Value("ctx2"))
+	assert.NotNil(t, secCtx.Value(contextKey("ctx1")))
+	assert.Nil(t, secCtx.Value(contextKey("ctx2")))
 	assert.NotNil(t, secCtx.Value(cycleKey))
 
 	secDeadline, ok := secCtx.Deadline()
@@ -45,7 +48,7 @@ func Test_ContextSecurity(t *testing.T) {
 	ctxA := NewDependencyContext(context.Background(), gen, &i42)
 
 	i105 := 105
-	ctxB := NewDependencyContext(ctxA, &i105)
+	ctxB := NewDependencyContext(ctxA, WithOverrides(), &i105)
 
 	assert.Equal(t, "42", *Get[*string](ctxB))
 }

@@ -1,7 +1,6 @@
 package ctxdep
 
 import (
-	"fmt"
 	"reflect"
 	"sync"
 )
@@ -14,9 +13,6 @@ type typeInfo struct {
 	keyableFound      bool
 	isInterface       bool
 
-	// Cache interface implementations to avoid repeated AssignableTo checks
-	implementedInterfaces []reflect.Type
-
 	// For function types, cache parameter and return types
 	funcParams  []reflect.Type
 	funcReturns []reflect.Type
@@ -27,7 +23,6 @@ type typeInfo struct {
 var (
 	globalTypeCache sync.Map // map[reflect.Type]*typeInfo
 	keyableType     = reflect.TypeOf((*Keyable)(nil)).Elem()
-	stringerType    = reflect.TypeOf((*fmt.Stringer)(nil)).Elem()
 )
 
 // getTypeInfo returns cached type information, computing it if necessary
