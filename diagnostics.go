@@ -28,7 +28,7 @@ func (d *DependencyContext) Status() string {
 			case StatusDirect:
 				slotLine = fmt.Sprintf("%v - direct value set", t)
 			case StatusGenerator:
-				if s.value == nil {
+				if s.value.Load() == nil {
 					slotLine = fmt.Sprintf("%v - uninitialized - generator: %s", t, formatGeneratorDebug(s.generator))
 				} else {
 					slotLine = fmt.Sprintf("%v - created from generator: %s", t, formatGeneratorDebug(s.generator))

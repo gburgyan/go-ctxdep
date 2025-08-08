@@ -334,10 +334,12 @@ func (d *DependencyContext) processAdapters() {
 	// First pass: collect all adapters
 	d.slots.Range(func(key, value any) bool {
 		s := value.(*slot)
-		if aw, ok := s.value.(*adaptWrapper); ok {
-			adapters = append(adapters, aw)
-			// Remove the adapter wrapper from slots temporarily
-			d.slots.Delete(key)
+		if val := s.value.Load(); val != nil {
+			if aw, ok := (*val).(*adaptWrapper); ok {
+				adapters = append(adapters, aw)
+				// Remove the adapter wrapper from slots temporarily
+				d.slots.Delete(key)
+			}
 		}
 		return true
 	})
@@ -351,11 +353,11 @@ func (d *DependencyContext) processAdapters() {
 
 		// Store the created adapted function
 		s := &slot{
-			value:           adaptedFunc,
 			slotType:        aw.targetType,
 			status:          StatusAdapter,
 			adapterOriginal: aw.originalFunc,
 		}
+		s.value.Store(&adaptedFunc)
 		d.slots.Store(aw.targetType, s)
 	}
 }

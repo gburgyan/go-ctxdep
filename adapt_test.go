@@ -1320,7 +1320,7 @@ func TestAdapterSlotReuse(t *testing.T) {
 	}
 
 	// The value should be set (the adapter function)
-	if slot1.value == nil {
+	if slot1.value.Load() == nil {
 		t.Error("slot value is nil")
 	}
 

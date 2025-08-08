@@ -30,7 +30,7 @@ func (d *DependencyContext) addGenerator(generatorFunction any, immediate *immed
 			if !d.loose && !d.isOverrideable(resultType) {
 				panic(fmt.Sprintf("generator result type %v already exists--a generator may not override an existing slot", resultType))
 			}
-			if existingSlot.value != nil {
+			if existingSlot.value.Load() != nil {
 				// Never override a concrete value
 				return
 			}
@@ -52,7 +52,6 @@ func (d *DependencyContext) addGenerator(generatorFunction any, immediate *immed
 		}
 
 		s := &slot{
-			value:     nil,
 			generator: generatorFunction,
 			slotType:  resultType,
 			immediate: immediate,
@@ -136,14 +135,18 @@ func (d *DependencyContext) mapGeneratorResults(results []reflect.Value, targetT
 		// Now save the result value to the slot for later use.
 		if resultSlotA, ok := d.slots.Load(resultType); ok {
 			resultSlot := resultSlotA.(*slot)
-			if resultSlot.value == nil {
-				resultSlot.value = result.Interface()
+			if resultSlot.value.Load() == nil {
+				val := result.Interface()
+				resultSlot.value.Store(&val)
 				resultSlot.status = StatusGenerator
 			}
 		} else {
 			// We should never get this since the addGenerator call
 			// should have pre-created these.
-			d.slots.Store(resultType, &slot{value: result.Interface(), status: StatusGenerator})
+			s := &slot{status: StatusGenerator}
+			val := result.Interface()
+			s.value.Store(&val)
+			d.slots.Store(resultType, s)
 		}
 	}
 	return nil
@@ -179,7 +182,7 @@ func (d *DependencyContext) getGeneratorOutputSlots(activeSlot *slot) []*slot {
 // fulfilled by the dependencies present. This does not check for cyclic dependencies as
 // that would be more expensive.
 func (d *DependencyContext) isSlotValid(s *slot) bool {
-	if s.value != nil {
+	if s.value.Load() != nil {
 		return true
 	}
 	genType := reflect.TypeOf(s.generator)

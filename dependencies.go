@@ -3,10 +3,12 @@ package ctxdep
 import (
 	"context"
 	"fmt"
-	"github.com/gburgyan/go-timing"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/gburgyan/go-timing"
 )
 
 type key int
@@ -96,7 +98,7 @@ type DependencyContext struct {
 
 // slot stored the internal state of a dependency slot.
 type slot struct {
-	value     any
+	value     atomic.Pointer[any]
 	generator any
 	slotType  reflect.Type
 	lock      sync.Mutex
@@ -307,10 +309,10 @@ func (d *DependencyContext) addValue(depType reflect.Type, dep any) {
 
 	// A value may override an existing slot.
 	s := &slot{
-		value:    dep,
 		slotType: depType,
 		status:   StatusDirect,
 	}
+	s.value.Store(&dep)
 	d.slots.Store(depType, s)
 }
 
@@ -362,12 +364,14 @@ func (d *DependencyContext) FillDependency(ctx context.Context, target any) erro
 				// Hoist the parent dependency to this level to save time on future calls.
 				// At this point the target is a pointer to a pointer to the value, so we
 				// have to unwrap one level of indirection.
-				d.slots.Store(t, &slot{
-					value:     reflect.ValueOf(target).Elem().Interface(),
+				s := &slot{
 					generator: nil,
 					slotType:  t,
 					status:    StatusFromParent,
-				})
+				}
+				val := reflect.ValueOf(target).Elem().Interface()
+				s.value.Store(&val)
+				d.slots.Store(t, s)
 			}
 		}
 		return err
@@ -451,8 +455,8 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 	//
 	// This is here as an optimization to prevent the code from acquiring the locks if we
 	// don't need to.
-	if activeSlot.value != nil {
-		slotVal := reflect.ValueOf(activeSlot.value)
+	if activeSlot.value.Load() != nil {
+		slotVal := reflect.ValueOf(*activeSlot.value.Load())
 		targetVal.Elem().Set(slotVal)
 		return nil
 	}
@@ -487,8 +491,8 @@ func (d *DependencyContext) getValue(ctx context.Context, activeSlot *slot, targ
 	}
 
 	// This is the same check as above, but now completely thread safe.
-	if activeSlot.value != nil {
-		slotVal := reflect.ValueOf(activeSlot.value)
+	if activeSlot.value.Load() != nil {
+		slotVal := reflect.ValueOf(*activeSlot.value.Load())
 		targetVal.Elem().Set(slotVal)
 		if timingCtx != nil {
 			timingCtx.AddDetails("wait", "parallel")
@@ -551,7 +555,7 @@ func (dc *DependencyContext) performCleanup() {
 		// First clean up our own dependencies
 		dc.slots.Range(func(key, value any) bool {
 			s := value.(*slot)
-			if s.value == nil {
+			if s.value.Load() == nil {
 				return true
 			}
 
@@ -561,11 +565,11 @@ func (dc *DependencyContext) performCleanup() {
 			if cleanupFunc, ok := dc.cleanupFuncs.Load(slotType); ok {
 				// We need to call the cleanup function with the correct type
 				cleanupValue := reflect.ValueOf(cleanupFunc)
-				valueToClean := reflect.ValueOf(s.value)
+				valueToClean := reflect.ValueOf(*s.value.Load())
 				cleanupValue.Call([]reflect.Value{valueToClean})
 			} else {
 				// Check if the value implements io.Closer
-				if closer, ok := s.value.(interface{ Close() error }); ok {
+				if closer, ok := (*s.value.Load()).(interface{ Close() error }); ok {
 					_ = closer.Close()
 				}
 			}

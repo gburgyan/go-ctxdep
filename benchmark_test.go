@@ -36,7 +36,7 @@ func BenchmarkGetSimpleGenerator(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = Get[*testWidget](ctx)
 		// Intentionally clear the generated value using a non-public value.
-		s.value = nil
+		s.value.Store(nil)
 	}
 }
 
@@ -54,7 +54,7 @@ func BenchmarkGetGeneratorWithDependency(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = Get[*testDoodad](ctx)
 		// Intentionally clear the generated value using a non-public value.
-		s.value = nil
+		s.value.Store(nil)
 	}
 }
 
@@ -72,6 +72,6 @@ func BenchmarkGetGeneratorWithDependencyAndContext(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = Get[*testDoodad](ctx)
 		// Intentionally clear the generated value using a non-public value.
-		s.value = nil
+		s.value.Store(nil)
 	}
 }
