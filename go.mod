@@ -1,6 +1,6 @@
 module github.com/gburgyan/go-ctxdep
 
-go 1.18
+go 1.19
 
 require (
 	github.com/gburgyan/go-timing v0.7.5
