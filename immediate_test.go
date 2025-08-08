@@ -5,42 +5,43 @@ import (
 	"fmt"
 	"github.com/gburgyan/go-timing"
 	"github.com/stretchr/testify/assert"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func Test_ImmediateDependency(t *testing.T) {
-	callCount := 0
+	var callCount int64
 	f := func() *testWidget {
-		callCount++
+		atomic.AddInt64(&callCount, 1)
 		return &testWidget{Val: 42}
 	}
 
-	assert.Equal(t, 0, callCount)
+	assert.Equal(t, int64(0), atomic.LoadInt64(&callCount))
 
 	ctx := NewDependencyContext(context.Background(), Immediate(f))
 
 	// Wait a bit to ensure the goroutine completes.
 	time.Sleep(100 * time.Millisecond)
 
-	assert.Equal(t, 1, callCount)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&callCount))
 
 	var widget *testWidget
 	GetBatch(ctx, &widget)
 
 	assert.Equal(t, 42, widget.Val)
-	assert.Equal(t, 1, callCount)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&callCount))
 }
 
 func Test_ImmediateDependency_LongCall(t *testing.T) {
-	callCount := 0
+	var callCount int64
 	f := func() *testWidget {
-		callCount++
+		atomic.AddInt64(&callCount, 1)
 		time.Sleep(100 * time.Millisecond)
 		return &testWidget{Val: 42}
 	}
 
-	assert.Equal(t, 0, callCount)
+	assert.Equal(t, int64(0), atomic.LoadInt64(&callCount))
 
 	EnableTiming = TimingGenerators
 	timingCtx := timing.Root(context.Background())
@@ -59,27 +60,25 @@ func Test_ImmediateDependency_LongCall(t *testing.T) {
 	d := time.Since(start)
 
 	assert.Equal(t, 42, widget.Val)
-	assert.Equal(t, 1, callCount)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&callCount))
 	assert.InEpsilon(t, 50*time.Millisecond, d, .1)
-
-	fmt.Println(timingCtx.String())
 }
 
 func Test_ImmediateDependency_Error(t *testing.T) {
-	callCount := 0
+	var callCount int64
 	f := func() (*testWidget, error) {
-		callCount++
+		atomic.AddInt64(&callCount, 1)
 		return nil, fmt.Errorf("expected error")
 	}
 
-	assert.Equal(t, 0, callCount)
+	assert.Equal(t, int64(0), atomic.LoadInt64(&callCount))
 
 	ctx := NewDependencyContext(context.Background(), Immediate(f))
 
 	// Wait a bit to ensure the goroutine completes.
 	time.Sleep(100 * time.Millisecond)
 
-	assert.Equal(t, 1, callCount)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&callCount))
 
 	var widget *testWidget
 	assert.Panics(t, func() {
@@ -87,24 +86,24 @@ func Test_ImmediateDependency_Error(t *testing.T) {
 	})
 
 	assert.Nil(t, widget)
-	assert.Equal(t, 2, callCount)
+	assert.Equal(t, int64(2), atomic.LoadInt64(&callCount))
 }
 
 func Test_ImmediateDependency_Panic(t *testing.T) {
-	callCount := 0
+	var callCount int64
 	f := func() (*testWidget, error) {
-		callCount++
+		atomic.AddInt64(&callCount, 1)
 		panic("expected panic")
 	}
 
-	assert.Equal(t, 0, callCount)
+	assert.Equal(t, int64(0), atomic.LoadInt64(&callCount))
 
 	ctx := NewDependencyContext(context.Background(), Immediate(f))
 
 	// Wait a bit to ensure the goroutine completes.
 	time.Sleep(100 * time.Millisecond)
 
-	assert.Equal(t, 1, callCount)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&callCount))
 
 	var widget *testWidget
 	assert.Panics(t, func() {
@@ -112,5 +111,5 @@ func Test_ImmediateDependency_Panic(t *testing.T) {
 	})
 
 	assert.Nil(t, widget)
-	assert.Equal(t, 2, callCount)
+	assert.Equal(t, int64(2), atomic.LoadInt64(&callCount))
 }

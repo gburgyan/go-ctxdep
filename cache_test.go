@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"reflect"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -561,9 +562,9 @@ func Test_handlePreRefresh_HappyCase(t *testing.T) {
 	cache := DumbCache{
 		values: make(map[string][]any),
 	}
-	calls := 0
+	var calls int64
 	f := func(s string) *string {
-		calls++
+		atomic.AddInt64(&calls, 1)
 		return &s
 	}
 	options := CtxCacheOptions{
@@ -582,7 +583,7 @@ func Test_handlePreRefresh_HappyCase(t *testing.T) {
 
 	handlePreRefresh(ctx, cacheKey, state, args, savedTime, ttl)
 	time.Sleep(time.Millisecond * 10)
-	assert.Equal(t, 1, calls)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&calls))
 }
 
 func Test_handlePreRefresh_TooNew(t *testing.T) {
@@ -592,9 +593,9 @@ func Test_handlePreRefresh_TooNew(t *testing.T) {
 	cache := DumbCache{
 		values: make(map[string][]any),
 	}
-	calls := 0
+	var calls int64
 	f := func(s string) *string {
-		calls++
+		atomic.AddInt64(&calls, 1)
 		return &s
 	}
 	options := CtxCacheOptions{
@@ -614,7 +615,7 @@ func Test_handlePreRefresh_TooNew(t *testing.T) {
 
 	handlePreRefresh(ctx, cacheKey, state, args, savedTime, ttl)
 	time.Sleep(time.Millisecond * 10)
-	assert.Equal(t, 0, calls)
+	assert.Equal(t, int64(0), atomic.LoadInt64(&calls))
 }
 
 func Test_handlePreRefresh_Panics(t *testing.T) {
@@ -624,9 +625,9 @@ func Test_handlePreRefresh_Panics(t *testing.T) {
 	cache := DumbCache{
 		values: make(map[string][]any),
 	}
-	calls := 0
+	var calls int64
 	f := func(s string) *string {
-		calls++
+		atomic.AddInt64(&calls, 1)
 		panic("test panic")
 	}
 	options := CtxCacheOptions{
@@ -646,5 +647,5 @@ func Test_handlePreRefresh_Panics(t *testing.T) {
 	// The function panics, but the panic is caught and the function continues.
 	handlePreRefresh(ctx, cacheKey, state, args, savedTime, ttl)
 	time.Sleep(time.Millisecond * 10)
-	assert.Equal(t, 1, calls)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&calls))
 }
