@@ -108,6 +108,66 @@ func TestGetBatchOptional(t *testing.T) {
 	}
 }
 
+func TestGetDependencyContextWithError(t *testing.T) {
+	t.Run("context exists", func(t *testing.T) {
+		ctx := context.Background()
+		ctx = NewDependencyContext(ctx)
+
+		dc, err := GetDependencyContextWithError(ctx)
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if dc == nil {
+			t.Error("expected non-nil dependency context")
+		}
+	})
+
+	t.Run("no dependency context", func(t *testing.T) {
+		ctx := context.Background()
+
+		dc, err := GetDependencyContextWithError(ctx)
+		if err == nil {
+			t.Error("expected error for missing dependency context")
+		}
+		if dc != nil {
+			t.Error("expected nil dependency context")
+		}
+		if err.Error() != "no dependency context available" {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+}
+
+func TestGetOptionalNoDependencyContext(t *testing.T) {
+	type TestDep struct {
+		Value string
+	}
+
+	t.Run("no dependency context returns false", func(t *testing.T) {
+		ctx := context.Background()
+
+		result, found := GetOptional[*TestDep](ctx)
+		if found {
+			t.Error("expected not to find dependency when no context exists")
+		}
+		if result != nil {
+			t.Error("expected nil result")
+		}
+	})
+
+	t.Run("value type returns zero value", func(t *testing.T) {
+		ctx := context.Background()
+
+		result, found := GetOptional[int](ctx)
+		if found {
+			t.Error("expected not to find dependency when no context exists")
+		}
+		if result != 0 {
+			t.Errorf("expected zero value, got %d", result)
+		}
+	})
+}
+
 func TestOptionalWithGenerators(t *testing.T) {
 	type GeneratedDep struct {
 		Value string

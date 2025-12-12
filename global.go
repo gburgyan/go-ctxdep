@@ -2,6 +2,7 @@ package ctxdep
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sync"
 )
@@ -156,16 +157,26 @@ func NewLooseDependencyContext(ctx context.Context, dependencies ...any) *Depend
 // if a DependencyContext is not found or is the wrong type then this function
 // panics.
 func GetDependencyContext(ctx context.Context) *DependencyContext {
+	dc, err := GetDependencyContextWithError(ctx)
+	if err != nil {
+		panic(err.Error())
+	}
+	return dc
+}
+
+// GetDependencyContextWithError finds a DependencyContext in the context stack and returns it.
+// If a DependencyContext is not found or is the wrong type, it returns an error instead of panicking.
+func GetDependencyContextWithError(ctx context.Context) (*DependencyContext, error) {
 	value := ctx.Value(dependencyContextKey)
 	if value == nil {
-		panic("no dependency context available")
+		return nil, fmt.Errorf("no dependency context available")
 	}
 	dc, ok := value.(*DependencyContext)
 	if !ok {
 		// We should never get here.
-		panic("dependency context unexpected type")
+		return nil, fmt.Errorf("dependency context unexpected type")
 	}
-	return dc
+	return dc, nil
 }
 
 // GetBatch behaves like GetBatchWithError except it will panic if the requested dependencies are not
@@ -212,11 +223,15 @@ func GetWithError[T any](ctx context.Context) (T, error) {
 
 // GetOptional returns the value of type T from the dependency context along with a boolean
 // indicating whether the dependency was found. Unlike Get, this function does not panic
-// if the dependency is not found.
+// if the dependency is not found or if there is no dependency context.
 func GetOptional[T any](ctx context.Context) (T, bool) {
-	dc := GetDependencyContext(ctx)
+	dc, err := GetDependencyContextWithError(ctx)
+	if err != nil {
+		var zero T
+		return zero, false
+	}
 	var target T
-	err := dc.FillDependency(ctx, &target)
+	err = dc.FillDependency(ctx, &target)
 	if err != nil {
 		return target, false
 	}

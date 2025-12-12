@@ -181,6 +181,12 @@ func (d *DependencyContext) addDependencies(deps []any, immediate *immediateDepe
 		}
 		if immediateWrapper, ok := dep.(*immediateDependencies); ok {
 			d.parentFixed = true
+			// Validate: Immediate cannot contain Optional
+			for _, innerDep := range immediateWrapper.dependencies {
+				if _, ok := innerDep.(*optionalWrapper); ok {
+					panic("Immediate() cannot wrap Optional()")
+				}
+			}
 			d.addDependencies(immediateWrapper.dependencies, immediateWrapper)
 		} else if ow, ok := dep.(*overrideableWrapper); ok {
 			d.parentFixed = true
@@ -194,6 +200,9 @@ func (d *DependencyContext) addDependencies(deps []any, immediate *immediateDepe
 			d.parentFixed = true
 			// Add validator to the validators slice
 			d.validators = append(d.validators, vw)
+		} else if ow, ok := dep.(*optionalWrapper); ok {
+			d.parentFixed = true
+			d.processOptionalDependency(ow)
 		} else if subSlice, ok := dep.([]any); ok {
 			d.addDependencies(subSlice, immediate)
 			d.parentFixed = true
@@ -222,6 +231,13 @@ func (d *DependencyContext) addDependencies(deps []any, immediate *immediateDepe
 
 // addOverrideableDependencies processes dependencies marked as overrideable
 func (d *DependencyContext) addOverrideableDependencies(deps []any, immediate *immediateDependencies) {
+	// Validate: Overrideable cannot contain Optional
+	for _, dep := range deps {
+		if _, ok := dep.(*optionalWrapper); ok {
+			panic("Overrideable() cannot wrap Optional()")
+		}
+	}
+
 	// First check if any of these types already exist in parent contexts
 	for _, dep := range deps {
 		depType := reflect.TypeOf(dep)
